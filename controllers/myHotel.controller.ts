@@ -1,3 +1,4 @@
+import { hotelProgress } from "../utils/hotelProgress";
 import type { Request, Response } from "express";
 import { Contract, noticeDeadline } from "../models/contract.model";
 import { FaultContact } from "../models/faultContact.model";
@@ -14,7 +15,7 @@ import { removeImage, replaceImage } from "../utils/replaceImage";
 // The signed-in hotel's own data (hotel managers; the staff login may read
 // the basics). Always req.user.hotel — never an id from the request.
 
-const EDITABLE = ["name", "kvkNumber", "address", "city", "region", "contactPerson", "phone", "description", "bookingUrl", "offer"] as const;
+const EDITABLE = ["name", "legalName", "kvkNumber", "vatNumber", "country", "address", "postalCode", "city", "region", "contactPerson", "phone", "description", "bookingUrl", "offer"] as const;
 
 async function myHotel(req: Request) {
   const hotel = await Hotel.findById(req.user!.hotel);
@@ -30,6 +31,11 @@ const withCompliance = (hotel: Awaited<ReturnType<typeof myHotel>>) => ({
 
 export const getMyHotel = asyncHandler(async (req: Request, res: Response) => {
   return ApiResponse(res, 200, "Hotel fetched successfully", withCompliance(await myHotel(req)));
+});
+
+/** GET /my-hotel/progress — the onboarding progress bar (Master Briefing v4). */
+export const getMyProgress = asyncHandler(async (req: Request, res: Response) => {
+  return ApiResponse(res, 200, "Progress fetched", await hotelProgress(await myHotel(req)));
 });
 
 export const updateMyHotel = asyncHandler(async (req: Request, res: Response) => {
@@ -151,8 +157,11 @@ export const getCalendar = asyncHandler(async (req: Request, res: Response) => {
 // ── Staff login (briefing §3.6) ─────────────────────────────────────────────
 
 /** The hotel's shared staff login: only sees the storingslijst. */
+/** The older single staff login of a hotel (not the personal staff accounts). */
+const SHARED_LOGIN = { role: "hotel_staff", hotelRole: { $in: [null, "shared"] } };
+
 export const getStaffLogin = asyncHandler(async (req: Request, res: Response) => {
-  const staff = await User.findOne({ hotel: req.user!.hotel, role: "hotel_staff" }).select("email isActive updatedAt").lean();
+  const staff = await User.findOne({ hotel: req.user!.hotel, ...SHARED_LOGIN }).select("email isActive updatedAt").lean();
   return ApiResponse(res, 200, "Staff login fetched successfully", staff);
 });
 
@@ -162,12 +171,12 @@ export const saveStaffLogin = asyncHandler(async (req: Request, res: Response) =
   const hotel = await myHotel(req);
 
   const taken = await User.findOne({ email });
-  let staff = await User.findOne({ hotel: hotel._id, role: "hotel_staff" }).select("+password");
+  let staff = await User.findOne({ hotel: hotel._id, ...SHARED_LOGIN }).select("+password");
   if (taken && (!staff || taken.id !== staff.id)) throw new ApiError(409, "This email address is already used by another account");
 
   if (!staff) {
     if (!password) throw new ApiError(422, "Choose a password for the new staff login");
-    staff = await User.create({ firstName: `${hotel.name} staff`, email, password, role: "hotel_staff", hotel: hotel._id });
+    staff = await User.create({ firstName: `${hotel.name} staff`, email, password, role: "hotel_staff", hotelRole: "shared", hotel: hotel._id });
   } else {
     staff.email = email;
     if (password) staff.password = password;
@@ -177,7 +186,7 @@ export const saveStaffLogin = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const deleteStaffLogin = asyncHandler(async (req: Request, res: Response) => {
-  await User.deleteOne({ hotel: req.user!.hotel, role: "hotel_staff" });
+  await User.deleteOne({ hotel: req.user!.hotel, ...SHARED_LOGIN });
   return ApiResponse(res, 200, "Staff login removed");
 });
 

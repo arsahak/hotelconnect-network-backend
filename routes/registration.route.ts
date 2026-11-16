@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  approveRegistration,
+  approveRegistration, askRegistration,
   createRegistration,
   getPublicSettings,
   getRegistration,
@@ -12,7 +12,7 @@ import { adminOnly } from "../middleware/auth";
 import { rateLimit } from "../middleware/rateLimit";
 import { validate } from "../middleware/validate";
 import { env } from "../config/env";
-import { listRegistrationsRules, registrationIdRules, registrationRules, rejectRules, settingsRules } from "../validators/registration.validator";
+import { listRegistrationsRules, registrationIdRules, registrationRules, rejectRules, approveRules, askRules, settingsRules } from "../validators/registration.validator";
 
 // Mounted twice in routes/index.ts: /settings and /registrations.
 export const settingsRouter = Router();
@@ -93,6 +93,18 @@ settingsRouter.patch("/", adminOnly, settingsRules, validate, updateSettings);
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
  *     responses:
  *       200: { description: "{ memberNumber }" }
+ * /registrations/admin/{id}/ask:
+ *   post:
+ *     summary: Email the applicant a question (e.g. the plan does not match); status becomes "waiting" (admins)
+ *     tags: [Registrations]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema: { type: object, properties: { message: { type: string } } }
+ *     responses:
+ *       200: { description: Sent }
  * /registrations/admin/{id}/reject:
  *   post:
  *     summary: Reject with an optional reason (emailed to the applicant)
@@ -105,5 +117,6 @@ settingsRouter.patch("/", adminOnly, settingsRules, validate, updateSettings);
 registrationRouter.post("/", signupLimiter, registrationRules, validate, createRegistration);
 registrationRouter.get("/admin", adminOnly, listRegistrationsRules, validate, listRegistrations);
 registrationRouter.get("/admin/:id", adminOnly, registrationIdRules, validate, getRegistration);
-registrationRouter.post("/admin/:id/approve", adminOnly, registrationIdRules, validate, approveRegistration);
+registrationRouter.post("/admin/:id/approve", adminOnly, approveRules, validate, approveRegistration);
+registrationRouter.post("/admin/:id/ask", adminOnly, askRules, validate, askRegistration);
 registrationRouter.post("/admin/:id/reject", adminOnly, rejectRules, validate, rejectRegistration);

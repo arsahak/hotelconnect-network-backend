@@ -13,8 +13,7 @@ import { upload } from "../middleware/upload";
 import { validate } from "../middleware/validate";
 import { idParamRule } from "../validators/common.validator";
 import { myVoucherRules } from "../validators/voucher.validator";
-import { body } from "express-validator";
-import { promoteVoucher } from "../controllers/ads.controller";
+import { requireFeature } from "../middleware/feature";
 
 const router = Router();
 const manager = hotelOnly("hotel_manager");
@@ -79,6 +78,8 @@ const manager = hotelOnly("hotel_manager");
  *     responses:
  *       200: { description: Photo removed }
  */
+// Phase 2 (Master Briefing v4): hidden until an admin switches vouchers on.
+router.use(requireFeature("vouchers"));
 router.get("/", manager, listMyVouchers);
 router.post("/", manager, myVoucherRules(true), validate, createMyVoucher);
 router.get("/:id", manager, idParamRule, validate, getMyVoucher);
@@ -86,22 +87,5 @@ router.patch("/:id", manager, idParamRule, myVoucherRules(false), validate, upda
 router.delete("/:id", manager, idParamRule, validate, deleteMyVoucher);
 router.put("/:id/image", manager, idParamRule, validate, upload.single("image"), uploadMyVoucherImage);
 router.delete("/:id/image", manager, idParamRule, validate, deleteMyVoucherImage);
-
-/**
- * @swagger
- * /my-vouchers/{id}/promote:
- *   post:
- *     summary: Promote a voucher for a month or quarter (briefing §3.10); returns the invoice with its checkout link
- *     tags: [MyVouchers]
- *     security: [{ bearerAuth: [] }]
- *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
- *     requestBody:
- *       content:
- *         application/json:
- *           schema: { type: object, properties: { period: { type: string, enum: [month, quarter] } } }
- *     responses:
- *       201: { description: "{ invoice }" }
- */
-router.post("/:id/promote", manager, idParamRule, body("period").isIn(["month", "quarter"]).withMessage("Choose month or quarter"), validate, promoteVoucher);
 
 export default router;

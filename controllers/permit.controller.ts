@@ -10,7 +10,7 @@ import { pick } from "../utils/pick";
 
 // Permits and certificates of the signed-in hotel (briefing §3.4.4).
 
-const EDITABLE = ["type", "authority", "issueDate", "expiryDate", "documentLink", "notes"] as const;
+const EDITABLE = ["type", "authority", "issueDate", "expiryDate", "reminderDays", "documentLink", "notes"] as const;
 const mine = (req: Request) => ({ hotel: req.user!.hotel });
 
 /** All permits, soonest expiry first, plus suggestions from the hotel's compliance profile. */

@@ -7,7 +7,7 @@ import { removeImage, replaceImage } from "../utils/replaceImage";
 // The signed-in supplier's own profile (briefing §4.2, §4.7). supplierOnly
 // has already loaded req.supplier.
 
-const EDITABLE = ["tagline", "description", "categories", "regions", "website", "certificates"] as const;
+const EDITABLE = ["tagline", "description", "city", "categories", "regions", "website", "certificates"] as const;
 const LOGO = { field: "logo", keyField: "logoKey", folder: "suppliers/logos" } as const;
 
 export const getMySupplier = asyncHandler(async (req: Request, res: Response) => {

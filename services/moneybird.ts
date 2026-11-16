@@ -91,6 +91,23 @@ export async function createAndSendMoneybirdInvoice(input: {
   return { id: invoice.id, url: invoice.url };
 }
 
+/**
+ * SEPA direct debit through Moneybird Payments: if the contact has no
+ * mandate yet, Moneybird emails them a link to authorise direct debit (a
+ * 15-cent verification payment). With a mandate, Moneybird collects the
+ * invoices itself. Docs: contacts → moneybird_payments_mandate.
+ */
+export async function ensureMoneybirdMandateRequested(contactId: string) {
+  try {
+    const contact = await call<{ moneybird_payments_mandate?: boolean }>(`/contacts/${contactId}.json`);
+    if (contact.moneybird_payments_mandate) return;
+    await call(`/contacts/${contactId}/moneybird_payments_mandate.json`, { method: "POST", body: "{}" });
+  } catch (error) {
+    // Moneybird Payments may be off for the administration: the invoice is still sent.
+    console.error("[moneybird] mandate request:", error instanceof Error ? error.message : error);
+  }
+}
+
 /** Registers a payment received elsewhere (Mollie or by hand), so Moneybird shows it as paid. */
 export async function registerMoneybirdPayment(invoiceId: string, amountCents: number, date = new Date()) {
   await call(`/sales_invoices/${invoiceId}/payments.json`, {

@@ -1,13 +1,17 @@
+import { JOB_TEXT_MAX, plainText, sanitizeJobText } from "../utils/sanitizeHtml";
 import { body, query, type ValidationChain } from "express-validator";
-import { EMPLOYMENT_TYPES, REGIONS, VACANCY_CATEGORIES } from "../config/constants";
+import { EMPLOYMENT_TYPES, REGIONS, SUPPLIER_VACANCY_CATEGORIES, SUPPLIER_VACANCY_GROUP_NAMES, VACANCY_CATEGORIES } from "../config/constants";
+import { VACANCY_EMPLOYERS } from "../models/vacancy.model";
 import { VACANCY_STATUSES, VACANCY_STYLES } from "../models/vacancy.model";
 import { PHONE_REGEX } from "../models/user.model";
 import { adminListRules, idParamRule, listQueryRules, optionalIn, slugParamRule } from "./common.validator";
 
 export const listVacanciesRules: ValidationChain[] = [
   ...listQueryRules,
-  optionalIn("category", VACANCY_CATEGORIES, "Category"),
+  // Hotel jobs: a category; supplier jobs: a main group (or a subcategory).
+  optionalIn("category", [...VACANCY_CATEGORIES, ...SUPPLIER_VACANCY_GROUP_NAMES, ...SUPPLIER_VACANCY_CATEGORIES], "Category"),
   optionalIn("region", REGIONS, "Region"),
+  optionalIn("employer", VACANCY_EMPLOYERS, "Employer"),
   query("urgent").optional().isBoolean().withMessage("urgent must be true or false"),
 ];
 
@@ -31,6 +35,16 @@ export const applyRules: ValidationChain[] = [
   body("message").optional().isString().trim().isLength({ max: 2000 }).withMessage("Message is too long"),
 ];
 
+/** Rich text (Master Briefing v4): at most 2000 visible characters; stored HTML up to 10000. */
+const descriptionRule = body("description")
+  .optional()
+  .isString()
+  .isLength({ max: 10_000 })
+  .withMessage("The description is too long")
+  .custom((value: string) => plainText(value).length <= JOB_TEXT_MAX)
+  .withMessage(`The description can be at most ${JOB_TEXT_MAX} characters`)
+  .customSanitizer((value: string) => sanitizeJobText(value));
+
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 /** Body for adding (create = true) or editing a job. */
@@ -39,8 +53,9 @@ export const vacancyBodyRules = (create: boolean): ValidationChain[] => {
   return [
     required("hotel").isMongoId().withMessage("Choose a hotel"),
     required("title").trim().isLength({ min: 2, max: 120 }).withMessage("Title must be 2–120 characters"),
-    body("description").optional().isString().trim().isLength({ max: 5000 }).withMessage("Description can be at most 5000 characters"),
-    required("category").isIn(VACANCY_CATEGORIES).withMessage("Choose a category"),
+    descriptionRule,
+    body("hours").optional().isString().trim().isLength({ max: 60 }).withMessage("Hours can be at most 60 characters"),
+    required("category").isIn([...VACANCY_CATEGORIES, ...SUPPLIER_VACANCY_CATEGORIES]).withMessage("Choose a category"),
     required("employmentType").isIn(EMPLOYMENT_TYPES).withMessage("Choose a type"),
     body("urgent").optional().isBoolean().toBoolean(),
     body("status").optional().isIn(VACANCY_STATUSES).withMessage(`Status must be one of: ${VACANCY_STATUSES.join(", ")}`),
@@ -74,19 +89,26 @@ const videoRule = body("videoUrl")
   .withMessage("The video must be a YouTube or Vimeo link");
 
 /**
- * Briefing §3.7: the hotel posts its own jobs. The hotel, city and region
- * come from the hotel itself; an admin publishes the job (status).
+ * Briefing §3.7: the hotel posts its own jobs; since 31 Oct suppliers with a
+ * maintenance contract too. For a hotel, city and region come from the hotel;
+ * a supplier fills them in. An admin publishes the job (status).
  */
 export const myVacancyRules = (create: boolean): ValidationChain[] => {
   const required = (field: string) => (create ? body(field) : body(field).optional());
   return [
     required("title").trim().isLength({ min: 2, max: 120 }).withMessage("Title must be 2–120 characters"),
-    body("description").optional().isString().trim().isLength({ max: 5000 }).withMessage("Description can be at most 5000 characters"),
-    required("category").isIn(VACANCY_CATEGORIES).withMessage("Choose a category"),
+    descriptionRule,
+    body("hours").optional().isString().trim().isLength({ max: 60 }).withMessage("Hours can be at most 60 characters"),
+    required("category")
+      .custom((value, { req }) => (req.user?.role === "supplier" ? SUPPLIER_VACANCY_CATEGORIES : (VACANCY_CATEGORIES as readonly string[])).includes(value))
+      .withMessage("Choose a category"),
     required("employmentType").isIn(EMPLOYMENT_TYPES).withMessage("Choose a type"),
     body("urgent").optional().isBoolean().toBoolean(),
     body("style").optional().isIn(VACANCY_STYLES).withMessage("Choose visual or traditional"),
     videoRule,
+    // Suppliers say where the job is; a hotel's job is at the hotel.
+    body("city").optional().trim().isLength({ min: 2, max: 80 }).withMessage("Fill in the city"),
+    body("region").optional().isIn(REGIONS).withMessage("Choose a region"),
     body("applyEmail")
       .optional({ checkFalsy: true })
       .trim()

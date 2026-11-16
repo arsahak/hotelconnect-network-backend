@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { body, query } from "express-validator";
-import { AD_BLOCKS, AD_PERIODS } from "../config/billing";
+import { AD_BLOCKS, AD_PERIODS, PAYMENT_METHODS } from "../config/billing";
 import { availability, adminBookings, book, cancel, myBookings, sponsored } from "../controllers/ads.controller";
 import {
   adminCancelInvoice,
@@ -9,7 +9,9 @@ import {
   adminMarkPaid,
   adminMemberBilling,
   adminStartSubscription,
-  changeInterval,
+  adminSetFounding,
+  cancelMyMembership,
+  changeMyPaymentMethod,
   mollieWebhook,
   myBilling,
 } from "../controllers/billing.controller";
@@ -17,6 +19,7 @@ import { adminOnly, authorize, protect } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { INVOICE_KINDS, INVOICE_STATUSES } from "../models/invoice.model";
 import { idParamRule } from "../validators/common.validator";
+import { requireFeature } from "../middleware/feature";
 
 const members = [protect, authorize("hotel_manager", "supplier")];
 
@@ -41,15 +44,22 @@ export const billingRouter = Router();
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200: { description: "{ subscription, invoices, plan, prices, online }" }
- * /billing/mine/interval:
+ * /billing/mine/cancel:
+ *   post:
+ *     summary: Cancel the membership (agreements §6) — ends at the end of the contract year, or a year later with less than 3 months' notice; suppliers in the free period leave at once
+ *     tags: [Billing]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Cancelled }
+ * /billing/mine/payment-method:
  *   patch:
- *     summary: Supplier with a contract — pay monthly or yearly from the next period
+ *     summary: SEPA direct debit (default) or paying each invoice by hand
  *     tags: [Billing]
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       content:
  *         application/json:
- *           schema: { type: object, properties: { interval: { type: string, enum: [month, year] } } }
+ *           schema: { type: object, properties: { paymentMethod: { type: string, enum: [sepa, invoice] } } }
  *     responses:
  *       200: { description: Saved }
  * /billing/admin/invoices:
@@ -61,7 +71,7 @@ export const billingRouter = Router();
  *       200: { description: "{ items, totals }" }
  * /billing/admin/invoices/{id}/paid:
  *   post:
- *     summary: Mark paid (bank transfer etc.); starts the ad or promotion it paid for (admins)
+ *     summary: Mark paid (bank transfer etc.); starts the ad it paid for (admins)
  *     tags: [Billing]
  *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
@@ -93,6 +103,17 @@ export const billingRouter = Router();
  *           schema: { type: object, properties: { hotel: { type: string }, supplier: { type: string }, interval: { type: string, enum: [month, year] } } }
  *     responses:
  *       201: { description: Started; the first invoice is raised }
+ * /billing/admin/founding:
+ *   post:
+ *     summary: Mark a hotel (first 10, €490) or supplier (first 10–15, €500) as founding member (admins)
+ *     tags: [Billing]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema: { type: object, properties: { hotel: { type: string }, supplier: { type: string }, founding: { type: boolean } } }
+ *     responses:
+ *       200: { description: Saved }
  * /billing/admin/subscriptions/{id}/cancel:
  *   post:
  *     summary: Stop renewing a membership (admins)
@@ -103,7 +124,8 @@ export const billingRouter = Router();
  *       200: { description: Cancelled }
  */
 billingRouter.get("/mine", members, myBilling);
-billingRouter.patch("/mine/interval", members, body("interval").isIn(["month", "year"]).withMessage("Choose month or year"), validate, changeInterval);
+billingRouter.post("/mine/cancel", members, cancelMyMembership);
+billingRouter.patch("/mine/payment-method", members, body("paymentMethod").isIn(PAYMENT_METHODS).withMessage("Choose direct debit or invoice"), validate, changeMyPaymentMethod);
 billingRouter.get(
   "/admin/invoices",
   adminOnly,
@@ -120,11 +142,19 @@ billingRouter.post(
   adminOnly,
   body("hotel").optional().isMongoId(),
   body("supplier").optional().isMongoId(),
-  body("interval").optional().isIn(["month", "year"]),
   validate,
   adminStartSubscription
 );
 billingRouter.post("/admin/subscriptions/:id/cancel", adminOnly, idParamRule, validate, adminCancelSubscription);
+billingRouter.post(
+  "/admin/founding",
+  adminOnly,
+  body("hotel").optional().isMongoId(),
+  body("supplier").optional().isMongoId(),
+  body("founding").isBoolean(),
+  validate,
+  adminSetFounding
+);
 
 // ── /payments ──
 export const paymentsRouter = Router();
@@ -178,7 +208,7 @@ export const adsRouter = Router();
  *             properties:
  *               block: { type: string, enum: [suppliers, jobs, hotels] }
  *               position: { type: integer }
- *               period: { type: string, enum: [month, quarter] }
+ *               period: { type: string, enum: [fortnight, month], description: 14 days, or 1 month (2 × 14 days) }
  *               vacancy: { type: string, description: jobs block only }
  *     responses:
  *       201: { description: "{ booking, invoice (paymentUrl when Mollie is set up) }" }
@@ -199,14 +229,16 @@ export const adsRouter = Router();
  *       200: { description: Bookings }
  */
 adsRouter.get("/sponsored", sponsored);
-adsRouter.get("/availability", members, availability);
-adsRouter.get("/mine", members, myBookings);
+// Phase 2 (Master Briefing v4): booking ads is hidden until an admin switches it on.
+adsRouter.get("/availability", requireFeature("advertising"), members, availability);
+adsRouter.get("/mine", requireFeature("advertising"), members, myBookings);
 adsRouter.post(
   "/",
+  requireFeature("advertising"),
   members,
   body("block").isIn(AD_BLOCKS).withMessage("Choose a block"),
   body("position").isInt({ min: 1 }).withMessage("Choose a position"),
-  body("period").isIn(AD_PERIODS).withMessage("Choose month or quarter"),
+  body("period").isIn(AD_PERIODS).withMessage("Choose 14 days or 1 month"),
   body("vacancy").optional({ checkFalsy: true }).isMongoId(),
   validate,
   book

@@ -1,8 +1,10 @@
 import { Router } from "express";
-import { awardTender, cancelTender, createTender, getTender, listTenders, reviewTender, updateTender } from "../controllers/tender.controller";
+import { awardTender, cancelTender, closeTender, createTender, getTender, listTenders, reviewTender, updateTender } from "../controllers/tender.controller";
 import { hotelOnly } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { awardRules, listTendersRules, reviewRules, tenderCreateRules, tenderIdRules, tenderUpdateRules } from "../validators/tender.validator";
+import { requireFeature } from "../middleware/feature";
+import { requireFirstContract } from "../middleware/onboarding";
 
 const router = Router();
 const manager = hotelOnly("hotel_manager");
@@ -36,7 +38,7 @@ const manager = hotelOnly("hotel_manager");
  *       201: { description: Tender sent (invitedCount = number of suppliers) }
  */
 router.get("/", manager, listTendersRules, validate, listTenders);
-router.post("/", manager, tenderCreateRules, validate, createTender);
+router.post("/", manager, requireFirstContract, tenderCreateRules, validate, createTender);
 
 /**
  * @swagger
@@ -85,6 +87,21 @@ router.post("/:id/cancel", manager, tenderIdRules, validate, cancelTender);
 
 /**
  * @swagger
+ * /tenders/{id}/close:
+ *   post:
+ *     summary: Close an open tender (Master Briefing v4) — it leaves the public Tenders page
+ *     tags: [Tenders]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Closed }
+ *       409: { description: Already closed }
+ */
+router.post("/:id/close", manager, tenderIdRules, validate, closeTender);
+
+/**
+ * @swagger
  * /tenders/{id}/review:
  *   put:
  *     summary: Rate the chosen supplier once the job is done (Kwaliteitsformulier); can be changed later
@@ -100,6 +117,6 @@ router.post("/:id/cancel", manager, tenderIdRules, validate, cancelTender);
  *       200: { description: Review saved; the supplier's ranking is updated }
  *       409: { description: No winner chosen yet }
  */
-router.put("/:id/review", manager, reviewRules, validate, reviewTender);
+router.put("/:id/review", requireFeature("reviews"), manager, reviewRules, validate, reviewTender);
 
 export default router;

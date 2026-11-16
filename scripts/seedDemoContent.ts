@@ -166,14 +166,14 @@ const SUPPLIERS = [
 
 // [title, hotel index, category, employment type, urgent, description]
 const VACANCIES: [string, number, string, string, boolean, string][] = [
-  ["Independent cook", 0, "Kitchen", "Full-time", true, "Cook breakfast and dinner for our 18 rooms and the canal-side terrace. You work with fresh, local produce and have room for your own ideas."],
-  ["Receptionist, evening shift", 1, "Front Office", "Part-time", true, "Welcome guests, handle check-ins and look after the bar in the evening. Dutch and English required, German is a plus."],
-  ["All-round maintenance technician", 2, "Technical", "Full-time", true, "Keep our monumental building running: small repairs, installations, contact with suppliers and the yearly inspections."],
+  ["Independent cook", 0, "F&B", "Full-time", true, "Cook breakfast and dinner for our 18 rooms and the canal-side terrace. You work with fresh, local produce and have room for your own ideas."],
+  ["Receptionist, evening shift", 1, "Reception", "Part-time", true, "Welcome guests, handle check-ins and look after the bar in the evening. Dutch and English required, German is a plus."],
+  ["All-round maintenance technician", 2, "Technical (TD)", "Full-time", true, "Keep our monumental building running: small repairs, installations, contact with suppliers and the yearly inspections."],
   ["Housekeeper", 3, "Housekeeping", "Part-time", false, "Make our sea-view rooms shine. Flexible hours, mostly mornings, with a fixed team."],
-  ["Breakfast host", 4, "F&B Service", "On call", false, "Serve our long breakfasts at the weekend and on holidays. Ideal next to your studies."],
+  ["Breakfast host", 4, "F&B", "On call", false, "Serve our long breakfasts at the weekend and on holidays. Ideal next to your studies."],
   ["Assistant hotel manager", 5, "Management", "Full-time", false, "Run the daily operation together with the owners: staff planning, revenue, guest contact and suppliers."],
-  ["Sous chef", 1, "Kitchen", "Full-time", false, "Lead the kitchen when the chef is off and help write the seasonal menu for our restaurant."],
-  ["Front office intern", 0, "Front Office", "Internship", false, "A 5-month hospitality internship at the front desk of a small canal-house hotel."],
+  ["Sous chef", 1, "F&B", "Full-time", false, "Lead the kitchen when the chef is off and help write the seasonal menu for our restaurant."],
+  ["Front office intern", 0, "Reception", "Internship", false, "A 5-month hospitality internship at the front desk of a small canal-house hotel."],
 ];
 
 // [title, hotel index, category, discount %, teaser]
@@ -288,7 +288,7 @@ async function run() {
         category,
         region: hotel.region,
         bookingUrl: "https://example.com/book",
-        // The first one is a paid promotion, shown first in the slideshow.
+        // The first one is featured by an admin, shown first in the slideshow.
         promotedUntil: index === 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
       });
       console.log(`voucher   ${title}`);

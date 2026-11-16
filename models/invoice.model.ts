@@ -1,13 +1,13 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export const INVOICE_KINDS = ["membership", "commission", "advertising", "promotion"] as const;
+export const INVOICE_KINDS = ["membership", "commission", "advertising"] as const;
 export type InvoiceKind = (typeof INVOICE_KINDS)[number];
 export const INVOICE_STATUSES = ["open", "paid", "cancelled"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 /**
  * Every invoice the platform raises (briefing "Betalingen en facturatie"):
- * memberships, commission, ads and voucher promotions. Amounts in cents.
+ * memberships, commission and homepage ads. Amounts in cents.
  * With Moneybird configured the invoice is also created and sent there; a
  * one-off payment gets a Mollie checkout.
  */
@@ -33,8 +33,10 @@ export interface IInvoice extends Document {
   paymentUrl?: string;
   moneybirdInvoiceId?: string;
   moneybirdUrl?: string;
-  /** Extra details for what happens once paid, e.g. { period: "month" } for a promotion. */
+  /** Extra details, e.g. the payment method of a membership invoice. */
   meta?: Record<string, string>;
+  /** Commission invoices: when the reminders went out and when the supplier was blocked. */
+  dunning?: { reminderAt?: Date | null; secondReminderAt?: Date | null; blockedAt?: Date | null };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,7 +49,7 @@ export interface IInvoice extends Document {
  *       type: object
  *       properties:
  *         number: { type: string, example: HC-2026-0001 }
- *         kind: { type: string, enum: [membership, commission, advertising, promotion] }
+ *         kind: { type: string, enum: [membership, commission, advertising] }
  *         description: { type: string }
  *         subtotal: { type: integer, description: cents excl. VAT }
  *         vat: { type: integer }
@@ -82,6 +84,11 @@ const invoiceSchema = new Schema<IInvoice>(
     moneybirdInvoiceId: { type: String, default: "" },
     moneybirdUrl: { type: String, default: "" },
     meta: { type: Schema.Types.Mixed, default: {} },
+    dunning: {
+      reminderAt: { type: Date, default: null },
+      secondReminderAt: { type: Date, default: null },
+      blockedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

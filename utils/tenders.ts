@@ -1,42 +1,32 @@
 import { env } from "../config/env";
-import { TENDER_MAX_SUPPLIERS } from "../config/constants";
+import type { TenderType } from "../config/constants";
 import type { IHotel } from "../models/hotel.model";
 import { Supplier } from "../models/supplier.model";
 import type { ITender } from "../models/tender.model";
-import { User } from "../models/user.model";
 import { notifyHotel, notifySupplier } from "./notify";
 import { escapeHtml } from "./sendEmail";
-
-const NATIONWIDE = "All of the Netherlands";
+import { languageFor, tenderAlert } from "./emailTemplates";
 
 /**
- * Briefing §3.5: a tender goes to at most three active suppliers with the
- * tender's category and region (or the whole country). Suppliers with a
- * login come first, since only they can send a quote; then the best rated
- * (briefing §3.8). A little randomness spreads the work between suppliers
- * with about the same score.
+ * Master Briefing v4: a tender is open to every supplier in the hotel's
+ * country (Country_Tag) with the tender's trade — no limit of 3 any more.
+ * "Maintenance" only goes to Maintenance Partners (plan "contract").
+ * They all get the new-tender alert and see it under Open Tenders.
  */
-export async function pickSuppliers(category: string, region: string) {
-  const candidates = await Supplier.find({
-    isActive: true,
-    categories: category,
-    regions: { $in: [region, NATIONWIDE] },
-  })
-    .select("_id name contact emails rating")
-    .lean();
-  if (!candidates.length) return [];
+export async function matchSuppliers(country: string, category: string, type: TenderType) {
+  const filter: Record<string, unknown> = { isActive: true, categories: category, country };
+  if (type === "Maintenance") filter.plan = "contract";
+  return Supplier.find(filter).select("_id name contact emails").lean();
+}
 
-  const withLogin = new Set(
-    (await User.distinct("supplier", { role: "supplier", isActive: true, supplier: { $in: candidates.map((s) => s._id) } })).map(String)
-  );
-  return candidates
-    .map((supplier) => ({
-      supplier,
-      rank: (withLogin.has(String(supplier._id)) ? 0 : 10) + (5 - (supplier.rating?.score ?? 3.5)) + Math.random() * 0.75,
-    }))
-    .sort((a, b) => a.rank - b.rank)
-    .slice(0, TENDER_MAX_SUPPLIERS)
-    .map(({ supplier }) => supplier);
+/** Open tenders a supplier may see: its country and trades (Maintenance only for Maintenance Partners). */
+export function openTendersFor(supplier: { _id: unknown; country?: string; categories?: string[]; plan?: string }) {
+  return {
+    status: "open",
+    country: supplier.country || "NL",
+    category: { $in: supplier.categories ?? [] },
+    ...(supplier.plan === "contract" ? {} : { type: { $ne: "Maintenance" } }),
+  };
 }
 
 const formatDate = (date: Date) =>
@@ -57,18 +47,19 @@ export async function notifyInvitations(tender: ITender, hotel: Pick<IHotel, "na
     suppliers.map((supplier) =>
       notifySupplier(
         String(supplier._id),
-        { type: "tender", title: `New ${tender.type.toLowerCase()}: ${tender.title}`, body: `${hotel.name} (${hotel.city}) invites you to send a quote.`, link },
-        {
-          to: notifyAddress(supplier),
-          // Briefing §6 "Behoeften": a reply goes straight to the hotel.
-          replyTo: hotel.emails?.general,
-          subject: `New ${tender.type.toLowerCase()}: ${tender.title}`,
-          html: `<p>Dear ${escapeHtml(supplier.name)},</p>
-            <p>${escapeHtml(hotel.name)} (${escapeHtml(hotel.city)}) invites you to send a quote.</p>
-            <p><strong>${escapeHtml(tender.title)}</strong><br>${escapeHtml(tender.category)} · ${escapeHtml(tender.region)}<br>
-            Deadline: ${formatDate(tender.deadline)}</p>
-            ${button(`${env.dashboardUrl}${link}`, "View the request and send your quote")}`,
-        }
+        { type: "tender", title: `New ${tender.size === "need" ? "request" : "tender"} (${tender.type.toLowerCase()}): ${tender.title}`, body: `${hotel.name} (${hotel.city}) invites you to send a quote.`, link },
+        // Email 6.4 (Master Briefing v4): from noreply@, Reply-To info@, in the hotel country's language.
+        (() => {
+          const mail = tenderAlert(languageFor({ country: tender.country }), {
+            supplierName: supplier.name,
+            trade: tender.category,
+            city: hotel.city,
+            title: tender.title,
+            timeline: formatDate(tender.deadline),
+            tenderLink: `${env.dashboardUrl}${link}`,
+          });
+          return { to: notifyAddress(supplier), subject: mail.subject, html: mail.html, from: mail.from };
+        })()
       )
     )
   );

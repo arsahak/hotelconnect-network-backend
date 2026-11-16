@@ -18,7 +18,7 @@ export interface IVoucher extends Document {
   region: string;
   bookingUrl: string;
   isActive: boolean;
-  /** Paid promotion: shown first in the slideshow until this date. */
+  /** Featured by an admin: shown first in the slideshow until this date. */
   promotedUntil?: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -67,7 +67,8 @@ const voucherSchema = new Schema<IVoucher>(
       max: [100, "Discount can be at most 100%"],
     },
     category: { type: String, enum: VOUCHER_CATEGORIES, required: [true, "Category is required"] },
-    region: { type: String, enum: REGIONS, required: true },
+    // Dutch province; empty for hotels outside the Netherlands (Country_Tag).
+    region: { type: String, enum: [...REGIONS, ""], default: "" },
     bookingUrl: { type: String, required: [true, "Booking link is required"], trim: true },
     isActive: { type: Boolean, default: true },
     promotedUntil: { type: Date, default: null },

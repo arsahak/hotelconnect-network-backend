@@ -3,13 +3,14 @@ import { Hotel } from "../models/hotel.model";
 import { Offer } from "../models/offer.model";
 import { Review } from "../models/review.model";
 import { Tender } from "../models/tender.model";
+import type { TenderType } from "../config/constants";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
 import { containsRegex, queryString } from "../utils/listQuery";
 import { pick } from "../utils/pick";
 import { recalculateSupplierRating } from "../utils/supplierRating";
-import { notifyInvitations, notifyResult, pickSuppliers } from "../utils/tenders";
+import { notifyInvitations, notifyResult, matchSuppliers } from "../utils/tenders";
 import { chargeCommission } from "../services/billing";
 
 // Tenders of the signed-in hotel (briefing §3.5): send, compare quotes, pick a winner.
@@ -51,14 +52,25 @@ export const getTender = asyncHandler(async (req: Request, res: Response) => {
   return ApiResponse(res, 200, "Tender fetched successfully", { ...tender, offers, review });
 });
 
-/** Sends a new tender to at most three matching suppliers and emails them. */
+/**
+ * Publishes a tender (Master Briefing v4): anonymous on the public Tenders
+ * page; every supplier in the hotel's country with this trade gets an alert.
+ */
 export const createTender = asyncHandler(async (req: Request, res: Response) => {
-  const hotel = await Hotel.findById(req.user!.hotel).select("name city emails").lean();
+  const hotel = await Hotel.findById(req.user!.hotel).select("name city region country emails").lean();
   if (!hotel) throw new ApiError(404, "Hotel not found");
 
-  const data = pick(req.body, ["type", "title", "category", "region", "description", "deadline", "budget"] as const);
-  const suppliers = await pickSuppliers(String(data.category), String(data.region));
-  const tender = await Tender.create({ ...data, ...mine(req), invitedSuppliers: suppliers.map((s) => s._id) });
+  const data = pick(req.body, ["type", "title", "category", "region", "description", "deadline", "budget", "contactEmail"] as const);
+  const country = hotel.country || "NL";
+  const suppliers = await matchSuppliers(country, String(data.category), (data.type as TenderType) ?? "One-time assignment");
+  const tender = await Tender.create({
+    ...data,
+    ...mine(req),
+    country,
+    city: hotel.city,
+    region: country === "NL" ? data.region || hotel.region || "" : "",
+    invitedSuppliers: suppliers.map((s) => s._id),
+  });
 
   await notifyInvitations(tender, hotel, suppliers);
   return ApiResponse(
@@ -74,7 +86,7 @@ export const updateTender = asyncHandler(async (req: Request, res: Response) => 
   const tender = await Tender.findOne({ _id: req.params.id, ...mine(req) });
   if (!tender) throw new ApiError(404, "Tender not found");
   if (tender.status !== "open") throw new ApiError(409, "Only an open tender can be changed");
-  tender.set(pick(req.body, ["title", "description", "deadline", "budget"] as const));
+  tender.set(pick(req.body, ["title", "description", "deadline", "budget", "contactEmail"] as const));
   await tender.save();
   return ApiResponse(res, 200, "Tender saved successfully", tender);
 });
@@ -105,6 +117,19 @@ export const awardTender = asyncHandler(async (req: Request, res: Response) => {
     offers.map((offer) => notifyResult(tender, hotel!, offer.supplier, String(offer._id) === String(winner._id)))
   );
   return ApiResponse(res, 200, "Winner chosen", tender);
+});
+
+/**
+ * POST /tenders/:id/close — Master Briefing v4 [ Close Tender ]: the hotel is
+ * done (e.g. agreed directly with a supplier). It leaves the public page.
+ */
+export const closeTender = asyncHandler(async (req: Request, res: Response) => {
+  const tender = await Tender.findOne({ _id: req.params.id, ...mine(req) });
+  if (!tender) throw new ApiError(404, "Tender not found");
+  if (tender.status !== "open") throw new ApiError(409, "This tender is already closed");
+  tender.set({ status: "closed", closedAt: new Date() });
+  await tender.save();
+  return ApiResponse(res, 200, "Tender closed", tender);
 });
 
 /** Stops an open tender; suppliers can no longer send quotes. */

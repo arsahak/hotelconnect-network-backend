@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { Supplier, SUPPLIER_PUBLIC_FIELDS } from "../models/supplier.model";
+import { publicSupplier, Supplier, SUPPLIER_PUBLIC_FIELDS } from "../models/supplier.model";
 import { Notification } from "../models/notification.model";
 import { Review } from "../models/review.model";
 import { User } from "../models/user.model";
@@ -12,6 +12,8 @@ import { pick } from "../utils/pick";
 import { removeImage, replaceImage } from "../utils/replaceImage";
 import { uniqueSlug } from "../utils/slugify";
 import { deleteFromSpaces } from "../utils/uploadToSpaces";
+import { deleteSupplierFiles } from "../utils/memberFiles";
+import { deleteSupplierParticipations } from "./purchase.controller";
 
 const NATIONWIDE = "All of the Netherlands";
 
@@ -46,7 +48,7 @@ export const listSuppliers = asyncHandler(async (req: Request, res: Response) =>
     Supplier.countDocuments(filter),
   ]);
 
-  return ApiResponse(res, 200, "Suppliers fetched successfully", toPage(items, total, page, limit));
+  return ApiResponse(res, 200, "Suppliers fetched successfully", toPage(items.map(publicSupplier), total, page, limit));
 });
 
 export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
@@ -54,7 +56,7 @@ export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
     .select(SUPPLIER_PUBLIC_FIELDS)
     .lean();
   if (!supplier) throw new ApiError(404, "Supplier not found");
-  return ApiResponse(res, 200, "Supplier fetched successfully", supplier);
+  return ApiResponse(res, 200, "Supplier fetched successfully", publicSupplier(supplier));
 });
 
 // ── Admin: manage suppliers (admin / superadmin) ────────────────────────────
@@ -63,6 +65,8 @@ const SUPPLIER_EDITABLE = [
   "name",
   "tagline",
   "description",
+  "city",
+  "country",
   "categories",
   "regions",
   "website",
@@ -134,11 +138,14 @@ export const updateSupplier = asyncHandler(async (req: Request, res: Response) =
 export const deleteSupplier = asyncHandler(async (req: Request, res: Response) => {
   const supplier = await Supplier.findById(req.params.id);
   if (!supplier) throw new ApiError(404, "Supplier not found");
+  // Quote files, job photos and avatars first, while their records still exist.
+  await deleteSupplierFiles(supplier._id);
   await supplier.deleteOne();
   await Promise.all([
     User.deleteMany({ supplier: supplier._id, role: "supplier" }),
     Review.deleteMany({ supplier: supplier._id }),
     Notification.deleteMany({ supplier: supplier._id }),
+    deleteSupplierParticipations(supplier._id),
     deleteFromSpaces(supplier.logoKey),
     deleteFromSpaces(supplier.imageKey),
   ]);

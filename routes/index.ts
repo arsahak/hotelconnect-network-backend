@@ -23,6 +23,8 @@ import pushRoutes from "./push.route";
 import { registrationRouter, settingsRouter } from "./registration.route";
 import supplierTenderRoutes from "./supplierTender.route";
 import tenderRoutes from "./tender.route";
+import publicTenderRoutes from "./publicTender.route";
+import floorRoutes from "./floor.route";
 import faultContactRoutes from "./faultContact.route";
 import { getOptions } from "../controllers/meta.controller";
 
@@ -69,6 +71,8 @@ router.use("/contracts", contractRoutes);
 router.use("/permits", permitRoutes);
 router.use("/portal-links", portalLinkRoutes);
 router.use("/tenders", tenderRoutes);
+router.use("/public-tenders", publicTenderRoutes);
+router.use("/floor", floorRoutes);
 router.use("/supplier-tenders", supplierTenderRoutes);
 router.use("/my-supplier", mySupplierRoutes);
 router.use("/my-vacancies", myVacancyRoutes);

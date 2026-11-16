@@ -78,3 +78,52 @@ export const supplierOnly = [
     next();
   }),
 ];
+
+/**
+ * Features for hotels and suppliers with a subscription (client, 31 Oct):
+ * hotel managers, and suppliers with a maintenance contract — not one-time
+ * contractors. Sets req.supplier for suppliers.
+ */
+const subscribedMember = (feature: string) => [
+  protect,
+  authorize("hotel_manager", "supplier"),
+  asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+    if (req.user!.role === "supplier") {
+      const supplier = req.user?.supplier ? await Supplier.findById(req.user.supplier) : null;
+      if (!supplier || !supplier.isActive) throw new ApiError(403, "This supplier membership is not active");
+      if (supplier.plan !== "contract") throw new ApiError(403, `${feature} is for suppliers with a maintenance contract`);
+      req.supplier = supplier;
+    } else if (!req.user!.hotel) throw new ApiError(403, "This account is not linked to a hotel");
+    next();
+  }),
+];
+
+/** Collective purchasing. */
+export const purchasingMember = subscribedMember("Collective purchasing");
+/** Posting jobs. */
+export const vacancyOwner = subscribedMember("Posting jobs");
+
+/**
+ * Public routes that show more to a signed-in supplier (Master Briefing v4:
+ * the hotel name and contact email of a tender). Never fails: without a valid
+ * supplier token the request simply stays anonymous.
+ */
+export const optionalSupplier = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+  const header = req.headers.authorization;
+  if (header?.startsWith("Bearer ")) {
+    try {
+      const payload = jwt.verify(header.split(" ")[1], env.jwtSecret) as TokenPayload;
+      const user = await User.findById(payload.id);
+      if (user?.isActive && user.role === "supplier" && user.supplier) {
+        const supplier = await Supplier.findById(user.supplier);
+        if (supplier?.isActive) {
+          req.user = user;
+          req.supplier = supplier;
+        }
+      }
+    } catch {
+      // Expired or wrong token: carry on as a visitor.
+    }
+  }
+  next();
+});

@@ -12,7 +12,8 @@ export interface IOffer extends Document {
   tender: mongoose.Types.ObjectId;
   supplier: mongoose.Types.ObjectId;
   price: number;
-  deliveryTime: string;
+  /** Delivery time in weeks (mandatory). */
+  deliveryWeeks: number;
   notes: string;
   file?: { url: string; key: string; name: string } | null;
   status: OfferStatus;
@@ -29,7 +30,7 @@ export interface IOffer extends Document {
  *       properties:
  *         _id: { type: string }
  *         price: { type: number, example: 11500 }
- *         deliveryTime: { type: string, example: 3 weeks }
+ *         deliveryWeeks: { type: integer, example: 3 }
  *         notes: { type: string }
  *         file: { type: object, properties: { url: { type: string }, name: { type: string } } }
  *         status: { type: string, enum: [submitted, won, lost] }
@@ -39,7 +40,7 @@ const offerSchema = new Schema<IOffer>(
     tender: { type: Schema.Types.ObjectId, ref: "Tender", required: true, index: true },
     supplier: { type: Schema.Types.ObjectId, ref: "Supplier", required: true, index: true },
     price: { type: Number, required: [true, "Price is required"], min: 0 },
-    deliveryTime: { type: String, trim: true, default: "", maxlength: 100 },
+    deliveryWeeks: { type: Number, min: 0, required: [true, "Delivery time is required"] },
     notes: { type: String, trim: true, default: "", maxlength: 2000 },
     file: {
       type: new Schema({ url: String, key: String, name: String }, { _id: false }),

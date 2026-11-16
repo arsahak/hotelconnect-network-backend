@@ -36,6 +36,8 @@ export const env = {
     .split(",")
     .map((url) => url.trim())
     .filter(Boolean),
+  // The public website (invite links, tenders).
+  websiteUrl: (process.env.WEBSITE_URL || "http://localhost:3000").replace(/\/$/, ""),
   // Linked from emails to hotels (e.g. contract reminders).
   dashboardUrl: (process.env.DASHBOARD_URL || "http://localhost:3001").replace(/\/$/, ""),
   // Briefing §7: admins sign in with an emailed code as a second step.
@@ -62,20 +64,23 @@ export const env = {
   publicUrl,
   jwtSecret: process.env.JWT_SECRET as string,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  // File storage (images, videos, PDFs): any S3-compatible object storage —
+  // Hetzner Object Storage (e.g. STORAGE_ENDPOINT=fsn1.your-objectstorage.com,
+  // STORAGE_REGION=fsn1) or DigitalOcean Spaces. The older DO_SPACES_* names
+  // still work. Without keys, local development stores files on disk.
   spaces: {
-    key: process.env.DO_SPACES_KEY || "",
-    secret: process.env.DO_SPACES_SECRET || "",
-    // e.g. "nyc3.digitaloceanspaces.com" — no protocol, no bucket prefix.
-    endpoint: process.env.DO_SPACES_ENDPOINT || "",
-    region: process.env.DO_SPACES_REGION || "",
-    bucket: process.env.DO_SPACES_BUCKET || "",
-    // Optional CDN endpoint for faster public delivery; falls back to the
-    // bucket's direct Spaces URL when unset.
-    cdnEndpoint: process.env.DO_SPACES_CDN_ENDPOINT || "",
-    // All uploads live under this root prefix within the shared bucket, so
-    // this project's files stay namespaced from other apps using the bucket.
-    // Set via DO_SPACES_FOLDER_NAME; surrounding slashes are stripped.
-    rootFolder: (process.env.DO_SPACES_FOLDER_NAME || "hotelconnect").replace(
+    key: process.env.STORAGE_KEY || process.env.DO_SPACES_KEY || "",
+    secret: process.env.STORAGE_SECRET || process.env.DO_SPACES_SECRET || "",
+    // Host only — no protocol, no bucket prefix.
+    endpoint: (process.env.STORAGE_ENDPOINT || process.env.DO_SPACES_ENDPOINT || "").replace(/^https?:\/\//, "").replace(/\/+$/, ""),
+    region: process.env.STORAGE_REGION || process.env.DO_SPACES_REGION || "",
+    bucket: process.env.STORAGE_BUCKET || process.env.DO_SPACES_BUCKET || "",
+    // Optional CDN / custom domain for public files; falls back to the
+    // bucket's own URL (https://<bucket>.<endpoint>/<key>).
+    cdnEndpoint: process.env.STORAGE_PUBLIC_URL || process.env.DO_SPACES_CDN_ENDPOINT || "",
+    // All uploads live under this root prefix, so this project's files stay
+    // apart from anything else in the bucket. Surrounding slashes are stripped.
+    rootFolder: (process.env.STORAGE_FOLDER || process.env.DO_SPACES_FOLDER_NAME || "hotelconnect").replace(
       /^\/+|\/+$/g,
       "",
     ),
@@ -89,5 +94,21 @@ export const env = {
   resend: {
     apiKey: process.env.RESEND_API_KEY || "",
     fromEmail: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
-  }
+  },
+  // Client (31 Oct): system emails from no-reply@hotelconnect-network.nl,
+  // replies to info@hotelconnect-network.nl, sent through TransIP SMTP.
+  // Master Briefing v4: welcomes and invites from info@hotelconnectnetwork.com;
+  // alerts and resets from noreply@hotelconnectnetwork.com with Reply-To info@.
+  mail: {
+    from: process.env.MAIL_FROM || process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+    fromInfo: process.env.MAIL_FROM_INFO || process.env.MAIL_FROM || process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+    replyTo: process.env.MAIL_REPLY_TO || "",
+  },
+  // When SMTP_HOST is set, emails go through SMTP (e.g. TransIP) instead of Resend.
+  smtp: {
+    host: process.env.SMTP_HOST || "",
+    port: Number(process.env.SMTP_PORT) || 465,
+    user: process.env.SMTP_USER || "",
+    password: process.env.SMTP_PASSWORD || "",
+  },
 };

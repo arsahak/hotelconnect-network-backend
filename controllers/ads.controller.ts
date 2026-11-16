@@ -5,9 +5,9 @@ import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
 import { adAvailability, cancelAdBooking, createAdBooking, liveSponsored } from "../services/ads";
 import type { Owner } from "../services/billing";
-import { createPromotionCheckout } from "../services/promotions";
+import { getFeatures } from "../models/setting.model";
 
-// Sponsored homepage spots (briefing §2.1, §3.15, §4.9) and voucher promotion (§3.10).
+// Sponsored homepage spots (briefing §2.1, §3.15, §4.9).
 
 function myOwner(req: Request): Owner {
   if (req.user!.role === "hotel_manager" && req.user!.hotel) return { hotel: req.user!.hotel };
@@ -16,7 +16,10 @@ function myOwner(req: Request): Owner {
 }
 
 /** GET /ads/sponsored — public: what the homepage shows as "Sponsored". */
-export const sponsored = asyncHandler(async (_req: Request, res: Response) => ApiResponse(res, 200, "Sponsored", await liveSponsored()));
+export const sponsored = asyncHandler(async (_req: Request, res: Response) =>
+  // Phase 2 (v4): with advertising off the homepage shows no sponsored items.
+  ApiResponse(res, 200, "Sponsored", (await getFeatures()).advertising ? await liveSponsored() : { suppliers: [], hotels: [], jobs: [] })
+);
 
 export const availability = asyncHandler(async (_req: Request, res: Response) => ApiResponse(res, 200, "Availability", await adAvailability()));
 
@@ -45,12 +48,4 @@ export const adminBookings = asyncHandler(async (_req: Request, res: Response) =
     .limit(300)
     .lean();
   return ApiResponse(res, 200, "Bookings", bookings);
-});
-
-/** POST /my-vouchers/:id/promote — month or quarter; returns the invoice with its checkout link. */
-export const promoteVoucher = asyncHandler(async (req: Request, res: Response) => {
-  const invoice = await createPromotionCheckout(req.user!.hotel!, String(req.params.id), req.body.period);
-  return ApiResponse(res, 201, invoice.paymentUrl ? "Pay to start the promotion" : "HotelConnect sends you the invoice; the promotion starts once paid", {
-    invoice: { _id: invoice._id, number: invoice.number, total: invoice.total, paymentUrl: invoice.paymentUrl },
-  });
 });

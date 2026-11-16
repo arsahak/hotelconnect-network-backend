@@ -8,14 +8,16 @@ import {
   updateMyVacancy,
   uploadMyVacancyImage,
 } from "../controllers/myVacancy.controller";
-import { hotelOnly } from "../middleware/auth";
+import { vacancyOwner } from "../middleware/auth";
 import { upload } from "../middleware/upload";
 import { validate } from "../middleware/validate";
+import { requireFirstContract } from "../middleware/onboarding";
 import { idParamRule } from "../validators/common.validator";
 import { myVacancyRules } from "../validators/vacancy.validator";
 
 const router = Router();
-const manager = hotelOnly("hotel_manager");
+// Hotel managers and suppliers with a maintenance contract (client, 31 Oct).
+const manager = vacancyOwner;
 
 /**
  * @swagger
@@ -78,7 +80,7 @@ const manager = hotelOnly("hotel_manager");
  *       200: { description: Photo removed }
  */
 router.get("/", manager, listMyVacancies);
-router.post("/", manager, myVacancyRules(true), validate, createMyVacancy);
+router.post("/", manager, requireFirstContract, myVacancyRules(true), validate, createMyVacancy);
 router.get("/:id", manager, idParamRule, validate, getMyVacancy);
 router.patch("/:id", manager, idParamRule, myVacancyRules(false), validate, updateMyVacancy);
 router.delete("/:id", manager, idParamRule, validate, deleteMyVacancy);

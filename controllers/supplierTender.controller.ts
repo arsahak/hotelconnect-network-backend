@@ -5,26 +5,33 @@ import { isAcceptingOffers, Tender, type ITender } from "../models/tender.model"
 import { asyncHandler } from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
-import { notifyNewOffer } from "../utils/tenders";
+import { notifyNewOffer, openTendersFor } from "../utils/tenders";
 import { deleteFromSpaces, uploadToSpaces } from "../utils/uploadToSpaces";
 
-// The signed-in supplier's invitations and quotes (briefing §4.5–4.6).
+// The signed-in supplier's Open Tenders and quotes (briefing §4.5–4.6,
+// Master Briefing v4: every open tender in its country and trades, plus the
+// ones it was alerted about before). Signed in, it sees the hotel and email.
 
 /** What the supplier sees as the status of an invitation. */
 function supplierStatus(tender: Pick<ITender, "status" | "deadline">, offer?: Pick<IOffer, "status"> | null) {
-  if (tender.status === "cancelled") return "cancelled";
+  if (tender.status === "cancelled" || tender.status === "closed") return "cancelled";
   if (offer) return offer.status; // submitted / won / lost
   if (tender.status === "awarded") return "lost";
   return isAcceptingOffers(tender) ? "open" : "expired";
 }
 
-const forMe = (req: Request) => ({ invitedSuppliers: req.supplier!._id });
+const forMe = (req: Request) => ({ $or: [{ invitedSuppliers: req.supplier!._id }, openTendersFor(req.supplier!)] });
+
+const HOTEL_FIELDS = "name city emails.general";
 
 /** The supplier's view: no other suppliers, no other quotes. */
 function present(tender: ITender & { hotel: unknown }, offer?: IOffer | null) {
-  const { invitedSuppliers: _invited, winner: _winner, ...rest } = tender as ITender & Record<string, unknown>;
+  const { invitedSuppliers: _invited, winner: _winner, hotel, ...rest } = tender as ITender & Record<string, unknown>;
+  const h = hotel as unknown as { _id: unknown; name: string; city: string; emails?: { general?: string } } | null;
   return {
     ...rest,
+    hotel: h && { _id: h._id, name: h.name, city: h.city },
+    contactEmail: tender.contactEmail || h?.emails?.general || "",
     acceptingOffers: isAcceptingOffers(tender),
     myStatus: supplierStatus(tender, offer),
     myOffer: offer ?? null,
@@ -32,7 +39,7 @@ function present(tender: ITender & { hotel: unknown }, offer?: IOffer | null) {
 }
 
 export const listInvitations = asyncHandler(async (req: Request, res: Response) => {
-  const tenders = await Tender.find(forMe(req)).populate("hotel", "name city").sort({ createdAt: -1 }).lean();
+  const tenders = await Tender.find(forMe(req)).populate("hotel", HOTEL_FIELDS).sort({ createdAt: -1 }).lean();
   const offers = await Offer.find({ supplier: req.supplier!._id, tender: { $in: tenders.map((t) => t._id) } })
     .select("-file.key")
     .lean();
@@ -46,7 +53,7 @@ export const listInvitations = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const getInvitation = asyncHandler(async (req: Request, res: Response) => {
-  const tender = await Tender.findOne({ _id: req.params.id, ...forMe(req) }).populate("hotel", "name city").lean();
+  const tender = await Tender.findOne({ _id: req.params.id, ...forMe(req) }).populate("hotel", HOTEL_FIELDS).lean();
   if (!tender) throw new ApiError(404, "Request not found");
   const offer = await Offer.findOne({ tender: tender._id, supplier: req.supplier!._id }).select("-file.key").lean();
   return ApiResponse(res, 200, "Request fetched successfully", present(tender as never, offer as never));
@@ -67,7 +74,7 @@ export const submitOffer = asyncHandler(async (req: Request, res: Response) => {
 
   offer.set({
     price: req.body.price,
-    deliveryTime: req.body.deliveryTime ?? "",
+    deliveryWeeks: Number(req.body.deliveryWeeks),
     notes: req.body.notes ?? "",
   });
   if (req.file) {

@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
   ARTICLE_KINDS,
+  COUNTRIES,
   EMPLOYMENT_TYPES,
   FAULT_TYPES,
   NOTICE_UNITS,
@@ -10,6 +11,7 @@ import {
   SUPPLIER_REGIONS,
   TENDER_TYPES,
   VACANCY_CATEGORIES,
+  SUPPLIER_VACANCY_GROUPS,
   VOUCHER_CATEGORIES,
 } from "../config/constants";
 import { ApiResponse } from "../utils/ApiResponse";
@@ -18,8 +20,10 @@ import { ApiResponse } from "../utils/ApiResponse";
 export const getOptions = (_req: Request, res: Response) =>
   ApiResponse(res, 200, "Options fetched successfully", {
     regions: REGIONS,
+    countries: COUNTRIES,
     supplierRegions: SUPPLIER_REGIONS,
     vacancyCategories: VACANCY_CATEGORIES,
+    supplierVacancyGroups: SUPPLIER_VACANCY_GROUPS,
     employmentTypes: EMPLOYMENT_TYPES,
     supplierCategories: SUPPLIER_CATEGORIES,
     voucherCategories: VOUCHER_CATEGORIES,

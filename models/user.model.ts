@@ -21,6 +21,19 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const ADMIN_ROLES: UserRole[] = ["superadmin", "admin"];
 export const HOTEL_ROLES: UserRole[] = ["hotel_manager", "hotel_staff"];
 
+/**
+ * Hotel staff accounts (Master Briefing v4): GM (= hotel_manager),
+ * department manager and staff (both hotel_staff). "shared" is the older
+ * single staff login of a hotel.
+ */
+export const HOTEL_USER_ROLES = ["gm", "dept_manager", "staff", "shared"] as const;
+export type HotelUserRole = (typeof HOTEL_USER_ROLES)[number];
+/** The four floor departments: Housekeeping, Technical (maintenance), Front Office, F&B. */
+export const DEPARTMENTS = ["HSK", "TD", "FO", "FB"] as const;
+export type Department = (typeof DEPARTMENTS)[number];
+/** Languages of the dashboard / floor app. */
+export const USER_LANGUAGES = ["en", "nl", "fr"] as const;
+
 export interface IUser extends Document {
   firstName: string;
   lastName: string;
@@ -36,6 +49,12 @@ export interface IUser extends Document {
   hotel?: mongoose.Types.ObjectId;
   /** The supplier a supplier account belongs to. */
   supplier?: mongoose.Types.ObjectId;
+  /** Hotel accounts: GM, department manager or staff (Master Briefing v4). */
+  hotelRole?: HotelUserRole | null;
+  /** Hotel staff: their department; empty = all departments. */
+  department?: Department | "" | null;
+  /** Preferred language of the dashboard / floor app. */
+  language?: (typeof USER_LANGUAGES)[number] | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -149,6 +168,9 @@ const userSchema = new Schema<IUser>(
       ref: "Supplier",
       index: true,
     },
+    hotelRole: { type: String, enum: [...HOTEL_USER_ROLES, null], default: null },
+    department: { type: String, enum: [...DEPARTMENTS, "", null], default: null },
+    language: { type: String, enum: [...USER_LANGUAGES, null], default: null },
     isActive: {
       type: Boolean,
       default: true,

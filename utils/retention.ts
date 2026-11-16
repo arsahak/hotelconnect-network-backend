@@ -4,18 +4,18 @@ import { Registration } from "../models/registration.model";
 import { WaitlistEntry } from "../models/waitlist.model";
 
 /**
- * AVG (GDPR) retention — briefing §5. Defaults, to be confirmed with the client:
- * - a registration's password hash is only needed until it is handled (the
- *   new account has its own copy), so it is removed once approved or rejected;
- * - rejected registrations are deleted after 12 months;
- * - read meldingen are deleted after 12 months;
- * - waitlist sign-ups are deleted after 24 months;
- * - invoices are kept 7 years (Dutch fiscal bewaarplicht), then deleted.
+ * AVG (GDPR) retention, as decided by the client (31 Oct 2026):
+ * - rejected registrations: 30 days;
+ * - notifications (meldingen): 12 months;
+ * - waitlist sign-ups: 12 months;
+ * - invoices: 7 years (Dutch fiscal bewaarplicht).
+ * A registration's password hash is only needed until it is handled (the new
+ * account has its own copy), so it is removed once approved or rejected.
  */
 export const RETENTION = {
-  rejectedRegistrationMonths: 12,
-  readNotificationMonths: 12,
-  waitlistMonths: 24,
+  rejectedRegistrationDays: 30,
+  notificationMonths: 12,
+  waitlistMonths: 12,
   invoiceYears: 7,
 } as const;
 
@@ -28,8 +28,8 @@ const monthsAgo = (months: number, now: Date) => {
 export async function applyRetention(now = new Date()) {
   const [hashes, registrations, notifications, waitlist, invoices] = await Promise.all([
     Registration.updateMany({ status: { $ne: "pending" }, passwordHash: { $exists: true } }, { $unset: { passwordHash: 1 } }),
-    Registration.deleteMany({ status: "rejected", updatedAt: { $lt: monthsAgo(RETENTION.rejectedRegistrationMonths, now) } }),
-    Notification.deleteMany({ readAt: { $ne: null }, createdAt: { $lt: monthsAgo(RETENTION.readNotificationMonths, now) } }),
+    Registration.deleteMany({ status: "rejected", updatedAt: { $lt: new Date(now.getTime() - RETENTION.rejectedRegistrationDays * 24 * 60 * 60 * 1000) } }),
+    Notification.deleteMany({ createdAt: { $lt: monthsAgo(RETENTION.notificationMonths, now) } }),
     WaitlistEntry.deleteMany({ createdAt: { $lt: monthsAgo(RETENTION.waitlistMonths, now) } }),
     Invoice.deleteMany({ issuedAt: { $lt: monthsAgo(RETENTION.invoiceYears * 12, now) } }),
   ]);

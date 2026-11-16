@@ -19,7 +19,7 @@ async function activeVoucherFilter() {
 
 /**
  * Public slideshow on the suppliers page (briefing §2.4): up to 10 vouchers,
- * paid promotions first, then the newest. No booking links here.
+ * featured ones (set by an admin) first, then the newest. No booking links here.
  */
 export const listFeaturedVouchers = asyncHandler(async (_req: Request, res: Response) => {
   const now = new Date();

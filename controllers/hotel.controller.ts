@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { Hotel, HOTEL_PUBLIC_FIELDS } from "../models/hotel.model";
+import { Hotel, HOTEL_PUBLIC_FIELDS, LISTED_HOTEL } from "../models/hotel.model";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
@@ -22,6 +22,7 @@ import { pick } from "../utils/pick";
 import { removeImage, replaceImage } from "../utils/replaceImage";
 import { uniqueSlug } from "../utils/slugify";
 import { deleteFromSpaces } from "../utils/uploadToSpaces";
+import { deleteHotelFiles } from "../utils/memberFiles";
 
 // ── Public: hotel guide (briefing §2.3) ─────────────────────────────────────
 
@@ -30,7 +31,7 @@ export const listHotels = asyncHandler(async (req: Request, res: Response) => {
   const q = queryString(req, "q");
   const region = queryString(req, "region");
 
-  const filter: Record<string, unknown> = { isActive: true };
+  const filter: Record<string, unknown> = { ...LISTED_HOTEL };
   if (region) filter.region = region;
   if (req.query.featured === "true") filter.featured = true;
   if (q) {
@@ -52,7 +53,7 @@ export const listHotels = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getHotel = asyncHandler(async (req: Request, res: Response) => {
-  const hotel = await Hotel.findOne({ slug: req.params.slug, isActive: true })
+  const hotel = await Hotel.findOne({ slug: req.params.slug, ...LISTED_HOTEL })
     .select(HOTEL_PUBLIC_FIELDS)
     .lean();
   if (!hotel) throw new ApiError(404, "Hotel not found");
@@ -146,6 +147,8 @@ export const deleteHotel = asyncHandler(async (req: Request, res: Response) => {
   const reviewedSuppliers = await Review.find({ hotel: hotel._id }).distinct("supplier");
   await Review.deleteMany({ hotel: hotel._id });
   await Promise.all(reviewedSuppliers.map((id) => recalculateSupplierRating(id)));
+  // Photos, quote files and floor app data first, while their records still exist.
+  await deleteHotelFiles(hotel._id);
   await Promise.all([
     Vacancy.deleteMany({ hotel: hotel._id }),
     Voucher.deleteMany({ hotel: hotel._id }),

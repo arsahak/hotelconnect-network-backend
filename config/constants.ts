@@ -18,19 +18,48 @@ export const REGIONS = [
 ] as const;
 export type Region = (typeof REGIONS)[number];
 
+/**
+ * Country_Tag (Master Briefing v4): decides which laws (knowledge base) apply
+ * and which suppliers and tenders match. ISO 3166-1 alpha-2 codes.
+ */
+export const COUNTRIES = [
+  { code: "NL", name: "Netherlands" },
+  { code: "BE", name: "Belgium" },
+  { code: "DE", name: "Germany" },
+  { code: "FR", name: "France" },
+  { code: "LU", name: "Luxembourg" },
+  { code: "GB", name: "United Kingdom" },
+] as const;
+export const COUNTRY_CODES = COUNTRIES.map((c) => c.code);
+export type CountryCode = (typeof COUNTRIES)[number]["code"];
+export const DEFAULT_COUNTRY: CountryCode = "NL";
+
+/** KvK number (NL: 8 digits) or a company registration number elsewhere. */
+export const REGISTRATION_NUMBER_REGEX = /^[A-Za-z0-9.\-]{4,20}$/;
+/** EU VAT number: country prefix + 2–13 letters/digits, e.g. NL123456789B01. */
+export const VAT_REGEX = /^[A-Za-z]{2}[A-Za-z0-9]{2,13}$/;
+
 /** Supplier regions may also be the whole country. */
 export const SUPPLIER_REGIONS = ["All of the Netherlands", ...REGIONS] as const;
 
-export const VACANCY_CATEGORIES = [
-  "Kitchen",
-  "Front Office",
-  "Housekeeping",
-  "F&B Service",
-  "Technical",
-  "Management",
-  "Other",
-] as const;
+/** Jobs at hotels (client, 31 Oct 2026). */
+export const VACANCY_CATEGORIES = ["F&B", "Housekeeping", "Reception", "Management", "Technical (TD)", "Other hospitality"] as const;
 export type VacancyCategory = (typeof VACANCY_CATEGORIES)[number];
+
+/** Jobs at suppliers: five main groups with subcategories (client, 31 Oct 2026). Filters use the group. */
+export const SUPPLIER_VACANCY_GROUPS = {
+  "Technical & Installation": ["Electrical engineering", "Mechanical engineering", "Climate & cooling", "Lift technology", "Fire safety", "Kitchen equipment"],
+  "Construction & Property": ["Contracting & construction", "Painting", "Roofing", "Architecture", "Interior & finishing"],
+  "Facilities & Green": ["Cleaning", "Linen & textiles", "Green & garden", "Pest control", "Waste & recycling"],
+  "Advisory & Consultancy": ["Sustainability & energy", "Consultancy", "Training & education", "Legal & fiscal"],
+  Other: ["IT & telecom", "Marketing & communication", "Other positions"],
+} as const;
+export type SupplierVacancyGroup = keyof typeof SUPPLIER_VACANCY_GROUPS;
+export const SUPPLIER_VACANCY_GROUP_NAMES = Object.keys(SUPPLIER_VACANCY_GROUPS) as SupplierVacancyGroup[];
+export const SUPPLIER_VACANCY_CATEGORIES = Object.values(SUPPLIER_VACANCY_GROUPS).flat() as string[];
+/** The group of a supplier job's subcategory. */
+export const supplierVacancyGroup = (category: string) =>
+  SUPPLIER_VACANCY_GROUP_NAMES.find((g) => (SUPPLIER_VACANCY_GROUPS[g] as readonly string[]).includes(category));
 
 export const EMPLOYMENT_TYPES = [
   "Full-time",
@@ -54,8 +83,12 @@ export const SUPPLIER_CATEGORIES = [
   "IT & software",
   "Security",
   "Staffing",
+  "Sustainability & Certifications",
   "Other",
 ] as const;
+
+/** Master Briefing v4: the supplier's company bio is at most 500 characters. */
+export const SUPPLIER_BIO_MAX = 500;
 
 /** Briefing §2.5: meeting, staying, dining, gift. */
 export const VOUCHER_CATEGORIES = ["Meeting", "Stay", "Dining", "Gift"] as const;
@@ -107,12 +140,14 @@ export const PORTAL_CATEGORIES = [
 ] as const;
 export type PortalCategory = (typeof PORTAL_CATEGORIES)[number];
 
-/** What a hotel asks suppliers for (briefing §4.5: tenders, maintenance contracts, product requests). */
-export const TENDER_TYPES = ["Tender", "Maintenance contract", "Product request"] as const;
+/** What a hotel asks suppliers for (client, 31 Oct 2026). "Maintenance" only goes to suppliers with a maintenance contract. */
+export const TENDER_TYPES = ["Maintenance", "One-time assignment", "Other"] as const;
 export type TenderType = (typeof TENDER_TYPES)[number];
 
-/** A tender goes to at most this many matching suppliers (briefing §3.5). */
-export const TENDER_MAX_SUPPLIERS = 3;
+/** Needs (small jobs) and tenders (large assignments) share one form; the budget decides (in euros). */
+export const NEED_BUDGET_LIMIT = 5_000;
+export type TenderSize = "need" | "tender";
+export const tenderSize = (budget: number): TenderSize => (budget < NEED_BUDGET_LIMIT ? "need" : "tender");
 
 /** Kinds of meldingen (briefing §3.12 aanvulling). */
 export const NOTIFICATION_TYPES = ["compliance", "tender", "vacancy", "fault", "system", "advertising"] as const;

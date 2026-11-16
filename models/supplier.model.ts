@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { SUPPLIER_CATEGORIES, SUPPLIER_REGIONS } from "../config/constants";
+import { COUNTRY_CODES, DEFAULT_COUNTRY, REGISTRATION_NUMBER_REGEX, SUPPLIER_CATEGORIES, SUPPLIER_REGIONS } from "../config/constants";
 import { EMAIL_REGEX } from "./user.model";
 
 /**
@@ -29,8 +29,16 @@ export interface ISupplier extends Document {
   /** Briefing §4.10 / price page: maintenance contract (€49/month or €539/year) or commission only. */
   plan: "contract" | "commission";
   kvkNumber: string;
+  /** Country_Tag (Master Briefing v4): tenders match on country + trade. */
+  country: string;
+  /** Where the company is based (Master Briefing v4 company profile). */
+  city: string;
   /** From the hotels' quality forms (briefing §3.8); see utils/supplierRating.ts. */
   rating: { average: number; count: number; score: number };
+  /** Founding supplier (first 10–15 with a contract): €500/year for as long as they stay. */
+  foundingMember: boolean;
+  /** Unpaid commission (51 days): the directory shows only the name, no website link. */
+  blocked: boolean;
   isActive: boolean;
   /** Briefing §4.2: separate addresses for invoices and notifications (general = contact.email). */
   emails: { invoices: string; notifications: string };
@@ -97,13 +105,17 @@ const supplierSchema = new Schema<ISupplier>(
     featured: { type: Boolean, default: false },
     showInPurchasing: { type: Boolean, default: false },
     plan: { type: String, enum: ["contract", "commission"], default: "commission" },
-    kvkNumber: { type: String, trim: true, default: "", match: [/^$|^[0-9]{8}$/, "KVK number has 8 digits"] },
+    kvkNumber: { type: String, trim: true, default: "", match: [new RegExp(`^$|${REGISTRATION_NUMBER_REGEX.source}`), "Fill in a valid registration number"] },
+    country: { type: String, enum: COUNTRY_CODES, default: DEFAULT_COUNTRY, index: true },
+    city: { type: String, trim: true, default: "", maxlength: 80 },
     rating: {
       average: { type: Number, default: 0 },
       count: { type: Number, default: 0 },
       // Used for the ranking. A supplier without reviews sits in the middle.
       score: { type: Number, default: 3.5, index: true },
     },
+    foundingMember: { type: Boolean, default: false },
+    blocked: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     emails: {
       invoices: { type: String, trim: true, lowercase: true, default: "", match: [/^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Please enter a valid email address"] },
@@ -133,6 +145,12 @@ supplierSchema.index({ isActive: 1, name: 1 });
 
 /** Fields the public website may see. */
 export const SUPPLIER_PUBLIC_FIELDS =
-  "memberNumber name slug logo image tagline description categories regions website featured";
+  "memberNumber name slug logo image tagline description categories regions website featured blocked";
+
+/** Public view of a supplier: a supplier blocked for unpaid commission shows no website link. */
+export function publicSupplier<T extends { website?: string; blocked?: boolean }>(supplier: T) {
+  const { blocked, ...rest } = supplier;
+  return blocked ? { ...rest, website: "" } : rest;
+}
 
 export const Supplier = mongoose.model<ISupplier>("Supplier", supplierSchema);

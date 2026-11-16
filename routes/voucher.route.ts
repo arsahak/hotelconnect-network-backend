@@ -18,6 +18,7 @@ import { validate } from "../middleware/validate";
 import { rateLimit } from "../middleware/rateLimit";
 import { env } from "../config/env";
 import { adminListVouchersRules, memberAccessRules, voucherBodyRules, voucherIdRules } from "../validators/voucher.validator";
+import { requireFeature } from "../middleware/feature";
 
 const router = Router();
 
@@ -41,13 +42,13 @@ const memberLimiter = rateLimit({
  * /vouchers/featured:
  *   get:
  *     summary: Slideshow vouchers (public, no booking links)
- *     description: Up to 10 — paid promotions first, then the newest.
+ *     description: Up to 10 — featured first, then the newest.
  *     tags: [Vouchers]
  *     responses:
  *       200:
  *         description: VoucherTeaser[] with a `promoted` flag
  */
-router.get("/featured", listFeaturedVouchers);
+router.get("/featured", requireFeature("vouchers"), listFeaturedVouchers);
 
 /**
  * @swagger
@@ -72,7 +73,7 @@ router.get("/featured", listFeaturedVouchers);
  *       422:
  *         description: Not a supplier member number
  */
-router.post("/member-access", memberLimiter, memberAccessRules, validate, memberVouchers);
+router.post("/member-access", requireFeature("vouchers"), memberLimiter, memberAccessRules, validate, memberVouchers);
 
 /**
  * @swagger
@@ -96,8 +97,8 @@ router.post("/member-access", memberLimiter, memberAccessRules, validate, member
  *       200: { description: "{ bookingUrl }" }
  *       404: { description: Voucher not found or not active }
  */
-router.get("/member", supplierOnly, signedInMemberVouchers);
-router.get("/:id/booking", supplierOnly, voucherIdRules, validate, voucherBooking);
+router.get("/member", requireFeature("vouchers"), supplierOnly, signedInMemberVouchers);
+router.get("/:id/booking", requireFeature("vouchers"), supplierOnly, voucherIdRules, validate, voucherBooking);
 
 // ── Admin ────────────────────────────────────────────────────────────────────
 

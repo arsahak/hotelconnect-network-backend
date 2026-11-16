@@ -1,7 +1,7 @@
 import { env } from "../config/env";
 import { euros } from "../config/billing";
 
-// Mollie: one-off payments only (ads, voucher promotions) — briefing: no Mollie Recurring.
+// Mollie: one-off payments for homepage ads only (client, 31 Oct) — no Mollie Recurring.
 // Docs: https://docs.mollie.com/reference/create-payment
 
 const API = "https://api.mollie.com/v2";

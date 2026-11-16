@@ -5,8 +5,13 @@ import { env } from "../config/env";
 import crypto from "crypto";
 import { escapeHtml, sendEmail } from "../utils/sendEmail";
 import { PasswordReset } from "../models/passwordReset.model";
+
+/** Master Briefing v4 (email 6.6): the reset link in the email is valid for 24 hours. */
+const RESET_LINK_TTL_HOURS = 24;
 import { HANDOFF_TTL_SECONDS, LoginHandoff } from "../models/loginHandoff.model";
 import { Supplier } from "../models/supplier.model";
+import { Hotel } from "../models/hotel.model";
+import { languageFor, passwordReset as passwordResetMail } from "../utils/emailTemplates";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
@@ -22,7 +27,6 @@ import {
   generateResetToken,
   hashResetToken,
 } from "../utils/otp";
-import { sendOtpEmail } from "../utils/sendEmail";
 
 /** "j***@hotel.nl" — tells the admin where the code went without showing the address. */
 const maskEmail = (email: string) => email.replace(/^(.)[^@]*(@.*)$/, "$1***$2");
@@ -136,8 +140,10 @@ export const forgotPassword = asyncHandler(
     const otp = generateOtp();
     const now = new Date();
     const otpExpiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60_000);
+    // Master Briefing v4 (email 6.6): the email also has a link, valid 24 hours.
+    const linkToken = generateResetToken();
+    const linkExpiresAt = new Date(now.getTime() + RESET_LINK_TTL_HOURS * 3_600_000);
 
-    // A fresh request wipes any earlier code or reset token for this account.
     await PasswordReset.findOneAndUpdate(
       { identifier: email },
       {
@@ -148,14 +154,26 @@ export const forgotPassword = asyncHandler(
           otpExpiresAt,
           attempts: 0,
           lastSentAt: now,
-          expiresAt: otpExpiresAt,
+          resetTokenHash: hashResetToken(linkToken),
+          resetTokenExpiresAt: linkExpiresAt,
+          expiresAt: linkExpiresAt,
         },
-        $unset: { resetTokenHash: "", resetTokenExpiresAt: "" },
       },
       { upsert: true }
     );
 
-    await sendOtpEmail(email, otp);
+    const accountName = user.hotel
+      ? ((await Hotel.findById(user.hotel).select("name").lean())?.name ?? "HotelConnect Network")
+      : user.supplier
+        ? ((await Supplier.findById(user.supplier).select("name").lean())?.name ?? "HotelConnect Network")
+        : "HotelConnect Network";
+    const mail = passwordResetMail(languageFor({ language: user.language }), {
+      userName: user.firstName,
+      accountName,
+      resetLink: `${env.dashboardUrl}/forgot-password?email=${encodeURIComponent(email)}&token=${linkToken}`,
+      code: otp,
+    });
+    await sendEmail({ to: email, subject: mail.subject, html: mail.html, from: mail.from });
 
     return ApiResponse(res, 200, "Code sent. Enter it to reset your password.", {
       email,
@@ -171,7 +189,7 @@ export const verifyResetOtp = asyncHandler(
     const email = normalizeEmail(req.body.email);
 
     const reset = await PasswordReset.findOne({ identifier: email });
-    if (!reset || reset.resetTokenHash) {
+    if (!reset) {
       throw new ApiError(
         400,
         "No password reset in progress for this email. Please start again."

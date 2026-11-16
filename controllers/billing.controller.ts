@@ -1,12 +1,13 @@
 import type { Request, Response } from "express";
-import { AD_PRICES, COMMISSION_PERCENT, PROMOTION_PRICES, SUBSCRIPTION_PRICES, VAT_RATE } from "../config/billing";
+import { FOUNDING_FREE_MONTHS, HOTEL_TIERS, hotelTier, NOTICE_MONTHS, SUPPLIER_FREE_UNTIL, SUPPLIER_PRICES, supplierPlan, VAT_RATE } from "../config/billing";
+import { Hotel } from "../models/hotel.model";
 import { Invoice } from "../models/invoice.model";
 import { Subscription } from "../models/subscription.model";
 import { Supplier } from "../models/supplier.model";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/ApiResponse";
 import { ApiError } from "../utils/ApiError";
-import { cancelInvoice, cancelSubscription, markInvoicePaid, startSubscription, type Owner } from "../services/billing";
+import { cancelInvoice, cancelSubscription, changePaymentMethod, markInvoicePaid, setFoundingMember, startSubscription, yearlyPrice, type Owner } from "../services/billing";
 import { getMolliePayment, mollieEnabled } from "../services/mollie";
 import { moneybirdEnabled } from "../services/moneybird";
 
@@ -24,29 +25,57 @@ const PUBLIC_INVOICE = "-meta -molliePaymentId -moneybirdInvoiceId";
 /** GET /billing/mine — membership, invoices and prices for the signed-in member. */
 export const myBilling = asyncHandler(async (req: Request, res: Response) => {
   const owner = myOwner(req);
-  const [subscription, invoices, supplier] = await Promise.all([
+  const [subscription, invoices, member] = await Promise.all([
     Subscription.findOne({ ...owner }).sort({ createdAt: -1 }).lean(),
     Invoice.find({ ...owner }).select(PUBLIC_INVOICE).sort({ issuedAt: -1 }).limit(100).lean(),
-    "supplier" in owner ? Supplier.findById(owner.supplier).select("plan").lean() : null,
+    "supplier" in owner
+      ? Supplier.findById(owner.supplier).select("plan foundingMember blocked").lean()
+      : Hotel.findById(owner.hotel).select("foundingMember facilities.rooms").lean(),
   ]);
+  const rooms = member && "facilities" in member ? member.facilities?.rooms ?? null : null;
+  const active = subscription ? await Subscription.findById(subscription._id) : null;
   return ApiResponse(res, 200, "Billing fetched", {
     subscription,
     invoices,
-    plan: supplier?.plan ?? null,
-    prices: { subscriptions: SUBSCRIPTION_PRICES, commissionPercent: COMMISSION_PERCENT, vatRate: VAT_RATE, ads: AD_PRICES, promotions: PROMOTION_PRICES },
+    plan: member && "plan" in member ? member.plan : null,
+    foundingMember: Boolean(member?.foundingMember),
+    rooms,
+    // The yearly price of the next paid period (excl. VAT).
+    nextYearPrice: active ? await yearlyPrice(active) : "supplier" in owner ? SUPPLIER_PRICES[supplierPlan((member as { plan?: string })?.plan)].year : hotelTier(rooms).price,
+    prices: {
+      hotelTiers: HOTEL_TIERS.map((t) => ({ key: t.key, maxRooms: Number.isFinite(t.maxRooms) ? t.maxRooms : null, price: t.price })),
+      foundingFreeMonths: FOUNDING_FREE_MONTHS,
+      suppliers: SUPPLIER_PRICES,
+      supplierFreeUntil: SUPPLIER_FREE_UNTIL,
+      noticeMonths: NOTICE_MONTHS,
+      vatRate: VAT_RATE,
+    },
     online: { mollie: mollieEnabled(), moneybird: moneybirdEnabled() },
   });
 });
 
-/** PATCH /billing/mine/interval — suppliers with a contract: monthly or yearly from the next period. */
-export const changeInterval = asyncHandler(async (req: Request, res: Response) => {
+/**
+ * POST /billing/mine/cancel — agreements §6: suppliers in the free period leave
+ * straight away; otherwise the membership ends at the end of the contract year
+ * (or a year later when less than 3 months' notice). No refunds.
+ */
+export const cancelMyMembership = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user!.role === "hotel_manager" || req.user!.role === "supplier") {
+    const sub = await Subscription.findOne({ ...myOwner(req), status: "active" });
+    if (!sub) throw new ApiError(404, "You have no active membership");
+    await cancelSubscription(sub);
+    return ApiResponse(res, 200, "Your membership is cancelled", sub);
+  }
+  throw new ApiError(403, "Only the hotel manager or the supplier can cancel");
+});
+
+/** PATCH /billing/mine/payment-method — SEPA direct debit (default) or paying each invoice by hand. */
+export const changeMyPaymentMethod = asyncHandler(async (req: Request, res: Response) => {
   const owner = myOwner(req);
-  if (!("supplier" in owner)) throw new ApiError(403, "Hotels pay per year");
-  const sub = await Subscription.findOne({ ...owner, status: "active", plan: "supplier-contract" });
+  const sub = await Subscription.findOne({ ...owner, status: "active" });
   if (!sub) throw new ApiError(404, "You have no active membership");
-  sub.interval = req.body.interval;
-  await sub.save();
-  return ApiResponse(res, 200, "Saved — this applies from your next period", sub);
+  await changePaymentMethod(sub, req.body.paymentMethod);
+  return ApiResponse(res, 200, req.body.paymentMethod === "sepa" ? "Saved — the next invoice is collected by direct debit" : "Saved — you pay the next invoice yourself", sub);
 });
 
 // ── Admins ──
@@ -87,18 +116,34 @@ export const adminMemberBilling = asyncHandler(async (req: Request, res: Respons
     Subscription.findOne(owner).sort({ createdAt: -1 }).lean(),
     Invoice.find(owner).sort({ issuedAt: -1 }).limit(50).lean(),
   ]);
-  return ApiResponse(res, 200, "Billing fetched", { subscription, invoices });
+  const member = "hotel" in owner
+    ? await Hotel.findById(owner.hotel).select("foundingMember").lean()
+    : await Supplier.findById(owner.supplier).select("foundingMember blocked").lean();
+  return ApiResponse(res, 200, "Billing fetched", {
+    subscription,
+    invoices,
+    foundingMember: Boolean(member?.foundingMember),
+    blocked: Boolean(member && "blocked" in member && member.blocked),
+  });
 });
 
-/** Starts billing for a member set up by hand (the first ten hotels and suppliers are free during the test phase). */
+/** Starts the membership of a member set up by hand (the first ten hotels and suppliers). */
 export const adminStartSubscription = asyncHandler(async (req: Request, res: Response) => {
-  const { hotel, supplier, interval } = req.body as { hotel?: string; supplier?: string; interval?: "month" | "year" };
-  if (hotel) return ApiResponse(res, 201, "Membership started", await startSubscription({ hotel }, "hotel", "year"));
+  const { hotel, supplier } = req.body as { hotel?: string; supplier?: string };
+  if (hotel) return ApiResponse(res, 201, "Membership started", await startSubscription({ hotel }, "hotel"));
   if (!supplier) throw new ApiError(422, "Give a hotel or supplier");
   const s = await Supplier.findById(supplier).select("plan").lean();
   if (!s) throw new ApiError(404, "Supplier not found");
-  if (s.plan !== "contract") throw new ApiError(409, "This supplier has no maintenance contract: it pays commission per won job");
-  return ApiResponse(res, 201, "Membership started", await startSubscription({ supplier }, "supplier-contract", interval ?? "month"));
+  return ApiResponse(res, 201, "Membership started", await startSubscription({ supplier }, supplierPlan(s.plan)));
+});
+
+/** POST /billing/admin/founding — { hotel | supplier, founding }: the introductory price, from the next period. */
+export const adminSetFounding = asyncHandler(async (req: Request, res: Response) => {
+  const { hotel, supplier, founding } = req.body as { hotel?: string; supplier?: string; founding: boolean };
+  const owner: Owner | null = hotel ? { hotel } : supplier ? { supplier } : null;
+  if (!owner) throw new ApiError(422, "Give a hotel or supplier");
+  await setFoundingMember(owner, Boolean(founding));
+  return ApiResponse(res, 200, founding ? "Founding member — the introductory price applies from the next period" : "Standard price from the next period", { founding: Boolean(founding) });
 });
 
 export const adminCancelSubscription = asyncHandler(async (req: Request, res: Response) => {

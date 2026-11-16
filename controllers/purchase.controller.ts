@@ -14,14 +14,17 @@ import { deletePrivate, readPrivate, uploadPrivate } from "../utils/uploadToSpac
 
 const ORDER = { open: 0, negotiating: 1, completed: 2 } as const;
 
-// ── Hotel managers ───────────────────────────────────────────────────────────
+// ── Hotel managers and suppliers with a contract ─────────────────────────────
 
-/** Every action with its participant count and the hotel's own participation. */
+/** The signed-in member as a participant: their hotel, or their supplier company. */
+const me = (req: Request) => (req.user!.role === "supplier" ? { supplier: req.supplier!._id } : { hotel: req.user!.hotel });
+
+/** Every action with its participant count and the member's own participation. */
 export const listActions = asyncHandler(async (req: Request, res: Response) => {
   const actions = await PurchaseAction.find().sort({ deadline: -1 }).lean();
   const [counts, mine] = await Promise.all([
     participantCounts(actions.map((a) => a._id)),
-    PurchaseParticipation.find({ hotel: req.user!.hotel, action: { $in: actions.map((a) => a._id) } })
+    PurchaseParticipation.find({ ...me(req), action: { $in: actions.map((a) => a._id) } })
       .select("-invoice.key")
       .lean(),
   ]);
@@ -46,14 +49,14 @@ export const joinAction = asyncHandler(async (req: Request, res: Response) => {
   if (!action) throw new ApiError(404, "Action not found");
   if (!isJoinable(action)) throw new ApiError(409, "This action is no longer open");
   if (!req.file) throw new ApiError(422, "Upload your latest annual invoice (PDF)");
-  if (await PurchaseParticipation.exists({ action: action._id, hotel: req.user!.hotel })) {
-    throw new ApiError(409, "Your hotel already takes part");
+  if (await PurchaseParticipation.exists({ action: action._id, ...me(req) })) {
+    throw new ApiError(409, "You already take part");
   }
 
   const invoice = await uploadPrivate(req.file, `purchasing/${action._id}`);
   const participation = await PurchaseParticipation.create({
     action: action._id,
-    hotel: req.user!.hotel,
+    ...me(req),
     currentSupplier: req.body.currentSupplier,
     contractEndDate: req.body.contractEndDate,
     annualUsage: req.body.annualUsage ?? "",
@@ -67,7 +70,7 @@ export const joinAction = asyncHandler(async (req: Request, res: Response) => {
     await notifyParticipants(
       action._id,
       `${action.title}: negotiations started`,
-      `${count} hotels joined. HotelConnect now negotiates with suppliers; you hear the result here.`
+      `${count} members joined. HotelConnect now negotiates with suppliers; you hear the result here.`
     );
   }
   return ApiResponse(res, 201, "You take part", participation);
@@ -78,8 +81,8 @@ export const withdrawAction = asyncHandler(async (req: Request, res: Response) =
   const action = await PurchaseAction.findById(req.params.id).select("status").lean();
   if (!action) throw new ApiError(404, "Action not found");
   if (action.status !== "open") throw new ApiError(409, "You can only withdraw while the action is open");
-  const participation = await PurchaseParticipation.findOneAndDelete({ action: action._id, hotel: req.user!.hotel });
-  if (!participation) throw new ApiError(404, "Your hotel does not take part");
+  const participation = await PurchaseParticipation.findOneAndDelete({ action: action._id, ...me(req) });
+  if (!participation) throw new ApiError(404, "You do not take part");
   await deletePrivate(participation.invoice?.key);
   return ApiResponse(res, 200, "You withdrew");
 });
@@ -100,6 +103,7 @@ export const adminGetAction = asyncHandler(async (req: Request, res: Response) =
   const participants = await PurchaseParticipation.find({ action: action._id })
     .select("-invoice.key")
     .populate("hotel", "name memberNumber city")
+    .populate("supplier", "name memberNumber")
     .sort({ createdAt: 1 })
     .lean();
   return ApiResponse(res, 200, "Action fetched successfully", { ...action, participants });
@@ -135,21 +139,24 @@ export const adminDeleteAction = asyncHandler(async (req: Request, res: Response
   return ApiResponse(res, 200, "Action deleted");
 });
 
-const invoiceName = (hotel: { memberNumber?: string; name?: string }) =>
-  `${hotel.memberNumber ?? "hotel"}-${slugify(hotel.name ?? "invoice")}.pdf`;
+type Member = { memberNumber?: string; name?: string } | null | undefined;
+const invoiceName = (hotel: Member, supplier?: Member) => {
+  const m = hotel ?? supplier;
+  return `${m?.memberNumber ?? "member"}-${slugify(m?.name ?? "invoice")}.pdf`;
+};
 
 /** GET /purchasing/admin/:id/zip — every invoice of the action in one ZIP, for the energy supplier. */
 export const adminDownloadZip = asyncHandler(async (req: Request, res: Response) => {
   const action = await PurchaseAction.findById(req.params.id).lean();
   if (!action) throw new ApiError(404, "Action not found");
   const participations = await PurchaseParticipation.find({ action: action._id, invoice: { $ne: null } })
-    .populate<{ hotel: { name: string; memberNumber: string } }>("hotel", "name memberNumber")
+    .populate<{ hotel: Member; supplier: Member }>([{ path: "hotel", select: "name memberNumber" }, { path: "supplier", select: "name memberNumber" }])
     .lean();
   if (!participations.length) throw new ApiError(404, "There are no invoices to download");
 
   // Read everything first, so an error still becomes a normal JSON error.
   const files = await Promise.all(
-    participations.map(async (p) => ({ name: invoiceName(p.hotel), data: await readPrivate(p.invoice!.key) }))
+    participations.map(async (p) => ({ name: invoiceName(p.hotel, p.supplier), data: await readPrivate(p.invoice!.key) }))
   );
 
   res.setHeader("Content-Type", "application/zip");
@@ -164,12 +171,12 @@ export const adminDownloadZip = asyncHandler(async (req: Request, res: Response)
 /** GET /purchasing/admin/:id/participants/:pid/invoice — one invoice. */
 export const adminDownloadInvoice = asyncHandler(async (req: Request, res: Response) => {
   const p = await PurchaseParticipation.findOne({ _id: req.params.pid, action: req.params.id })
-    .populate<{ hotel: { name: string; memberNumber: string } }>("hotel", "name memberNumber")
+    .populate<{ hotel: Member; supplier: Member }>([{ path: "hotel", select: "name memberNumber" }, { path: "supplier", select: "name memberNumber" }])
     .lean();
   if (!p?.invoice) throw new ApiError(404, "Invoice not found");
   const data = await readPrivate(p.invoice.key);
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${invoiceName(p.hotel)}"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${invoiceName(p.hotel, p.supplier)}"`);
   res.send(data);
 });
 
@@ -178,4 +185,11 @@ export async function deleteHotelParticipations(hotelId: unknown) {
   const participations = await PurchaseParticipation.find({ hotel: hotelId });
   await Promise.all(participations.map((p) => deletePrivate(p.invoice?.key)));
   await PurchaseParticipation.deleteMany({ hotel: hotelId });
+}
+
+// Same for suppliers (see supplier.controller deleteSupplier).
+export async function deleteSupplierParticipations(supplierId: unknown) {
+  const participations = await PurchaseParticipation.find({ supplier: supplierId });
+  await Promise.all(participations.map((p) => deletePrivate(p.invoice?.key)));
+  await PurchaseParticipation.deleteMany({ supplier: supplierId });
 }

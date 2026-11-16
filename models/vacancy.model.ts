@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { EMPLOYMENT_TYPES, REGIONS, VACANCY_CATEGORIES } from "../config/constants";
+import { EMPLOYMENT_TYPES, REGIONS, SUPPLIER_VACANCY_CATEGORIES, supplierVacancyGroup, VACANCY_CATEGORIES } from "../config/constants";
 import { EMAIL_REGEX } from "./user.model";
 
 export const VACANCY_STATUSES = ["pending", "published", "closed"] as const;
@@ -14,13 +14,23 @@ export type VacancyStyle = (typeof VACANCY_STYLES)[number];
  * (briefing §6). Applicants reach the hotel by WhatsApp, email, or the CV
  * form — the platform never stores applications or CVs.
  */
+/** Who offers the job: a hotel, or a supplier with a maintenance contract (client, 31 Oct). */
+export const VACANCY_EMPLOYERS = ["hotel", "supplier"] as const;
+export type VacancyEmployer = (typeof VACANCY_EMPLOYERS)[number];
+
 export interface IVacancy extends Document {
-  hotel: mongoose.Types.ObjectId;
+  employer: VacancyEmployer;
+  hotel?: mongoose.Types.ObjectId | null;
+  supplier?: mongoose.Types.ObjectId | null;
   title: string;
   slug: string;
   description: string;
   category: string;
+  /** Supplier jobs: the main group of the category (for the filter). */
+  categoryGroup?: string;
   employmentType: string;
+  /** Hours per week, free text (Master Briefing v4 job form), e.g. "32–38 hours". */
+  hours: string;
   city: string;
   region: string;
   urgent: boolean;
@@ -56,6 +66,7 @@ export interface IVacancy extends Document {
  *         description: { type: string }
  *         category: { type: string, example: Kitchen }
  *         employmentType: { type: string, example: Full-time }
+ *         hours: { type: string, example: 32–38 hours per week }
  *         city: { type: string, example: Amsterdam }
  *         region: { type: string, example: North Holland }
  *         urgent: { type: boolean }
@@ -72,14 +83,19 @@ export interface IVacancy extends Document {
  */
 const vacancySchema = new Schema<IVacancy>(
   {
-    hotel: { type: Schema.Types.ObjectId, ref: "Hotel", required: true, index: true },
+    employer: { type: String, enum: VACANCY_EMPLOYERS, default: "hotel", index: true },
+    hotel: { type: Schema.Types.ObjectId, ref: "Hotel", default: null, index: true },
+    supplier: { type: Schema.Types.ObjectId, ref: "Supplier", default: null, index: true },
     title: { type: String, required: [true, "Title is required"], trim: true, maxlength: 120 },
     slug: { type: String, required: true, unique: true, trim: true },
-    description: { type: String, trim: true, default: "", maxlength: 5000 },
-    category: { type: String, enum: VACANCY_CATEGORIES, required: [true, "Category is required"] },
+    description: { type: String, trim: true, default: "", maxlength: 10_000 },
+    category: { type: String, enum: [...VACANCY_CATEGORIES, ...SUPPLIER_VACANCY_CATEGORIES], required: [true, "Category is required"] },
+    categoryGroup: { type: String, default: "" },
     employmentType: { type: String, enum: EMPLOYMENT_TYPES, required: [true, "Type is required"] },
+    hours: { type: String, trim: true, default: "", maxlength: 60 },
     city: { type: String, required: true, trim: true },
-    region: { type: String, enum: REGIONS, required: true },
+    // Dutch province; empty for hotels outside the Netherlands (Country_Tag).
+    region: { type: String, enum: [...REGIONS, ""], default: "" },
     urgent: { type: Boolean, default: false },
     status: { type: String, enum: VACANCY_STATUSES, default: "pending" },
     applyEmail: {
@@ -103,7 +119,13 @@ const vacancySchema = new Schema<IVacancy>(
 
 vacancySchema.index({ status: 1, urgent: -1, publishedAt: -1 });
 
+vacancySchema.pre("validate", function (next) {
+  this.employer = this.supplier ? "supplier" : "hotel";
+  this.categoryGroup = this.supplier ? supplierVacancyGroup(this.category) ?? "" : "";
+  next();
+});
+
 export const VACANCY_PUBLIC_FIELDS =
-  "title slug description category employmentType city region urgent applyEmail applyWhatsapp style image videoUrl publishedAt hotel";
+  "title slug description category categoryGroup employmentType hours city region urgent applyEmail applyWhatsapp style image videoUrl publishedAt employer hotel supplier";
 
 export const Vacancy = mongoose.model<IVacancy>("Vacancy", vacancySchema);

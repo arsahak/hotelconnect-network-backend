@@ -14,15 +14,17 @@ const deadlineRule = (create: boolean) =>
     })
     .withMessage("The deadline must be today or later");
 
-/** Briefing §3.5: category, region, description, deadline, budget (+ type and title). */
+/** Briefing §3.5: category, region, description, deadline, budget (+ type and title). The budget decides need or tender. */
 export const tenderCreateRules: ValidationChain[] = [
   body("type").optional().isIn(TENDER_TYPES).withMessage("Choose a type from the list"),
   body("title").trim().isLength({ min: 3, max: 120 }).withMessage("Fill in a short title"),
   body("category").isIn(SUPPLIER_CATEGORIES).withMessage("Choose a category from the list"),
-  body("region").isIn(REGIONS).withMessage("Choose a region from the list"),
+  // The province only matters in the Netherlands; the API takes the hotel's own when empty.
+  body("region").optional({ checkFalsy: true }).isIn(REGIONS).withMessage("Choose a region from the list"),
+  body("contactEmail").optional({ checkFalsy: true }).trim().isEmail().withMessage("Fill in a valid contact email").customSanitizer((v: string) => v.toLowerCase()),
   body("description").trim().isLength({ min: 10, max: 5000 }).withMessage("Describe what you need (at least 10 characters)"),
   deadlineRule(true),
-  optionalNumber("budget", "Budget"),
+  body("budget").customSanitizer(Number).isFloat({ min: 0, max: 1e9 }).withMessage("Fill in a budget: below €5,000 it is a need, above a tender"),
 ];
 
 /** After sending, only the text, deadline and budget can change (the suppliers are already chosen). */
@@ -32,17 +34,21 @@ export const tenderUpdateRules: ValidationChain[] = [
   body("description").optional().trim().isLength({ min: 10, max: 5000 }).withMessage("Describe what you need (at least 10 characters)"),
   deadlineRule(false),
   optionalNumber("budget", "Budget"),
+  body("contactEmail").optional({ checkFalsy: true }).trim().isEmail().withMessage("Fill in a valid contact email").customSanitizer((v: string) => v.toLowerCase()),
 ];
+
+/** Public tender list (website). */
+export const publicTenderRules: ValidationChain[] = [...listQueryRules];
 
 export const tenderIdRules: ValidationChain[] = [idParamRule];
 export const listTendersRules: ValidationChain[] = [...listQueryRules];
 export const awardRules: ValidationChain[] = [idParamRule, body("offerId").isMongoId().withMessage("Choose a quote")];
 
-/** Briefing §4.6: price, PDF or photo, notes (+ delivery time for the comparison). Sent as multipart. */
+/** Briefing §4.6: price, PDF or photo, notes, and the delivery time in weeks (mandatory, client 31 Oct). Sent as multipart. */
 export const offerRules: ValidationChain[] = [
   param("id").isMongoId().withMessage("Invalid id"),
   body("price").customSanitizer(Number).isFloat({ min: 0, max: 1e9 }).withMessage("Fill in a price"),
-  body("deliveryTime").optional().isString().trim().isLength({ max: 100 }),
+  body("deliveryWeeks").customSanitizer(Number).isInt({ min: 0, max: 520 }).withMessage("Fill in the delivery time in weeks"),
   body("notes").optional().isString().trim().isLength({ max: 2000 }),
 ];
 

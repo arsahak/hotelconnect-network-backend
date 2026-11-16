@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { REGIONS, type HotelEmailType, type Region, NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, type NotificationChannel, type NotificationType } from "../config/constants";
+import { COUNTRY_CODES, DEFAULT_COUNTRY, REGIONS, REGISTRATION_NUMBER_REGEX, VAT_REGEX, type HotelEmailType, type Region, NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, type NotificationChannel, type NotificationType } from "../config/constants";
 import { EMAIL_REGEX } from "./user.model";
 
 /**
@@ -10,9 +10,16 @@ export interface IHotel extends Document {
   memberNumber: string;
   name: string;
   slug: string;
+  /** Country_Tag (Master Briefing v4): local laws, supplier and tender matching. */
+  country: string;
   city: string;
-  region: Region;
+  /** Dutch province; empty outside the Netherlands. */
+  region: Region | "";
   address: string;
+  postalCode: string;
+  /** Legal company name (may differ from the hotel name). */
+  legalName: string;
+  vatNumber: string;
   description: string;
   image: string;
   imageKey?: string;
@@ -21,6 +28,8 @@ export interface IHotel extends Document {
   offer?: string;
   /** Shown in homepage block 3. */
   featured: boolean;
+  /** One of the first 10 hotels: €490/year for as long as they stay. */
+  foundingMember: boolean;
   isActive: boolean;
   emails: {
     general: string;
@@ -77,6 +86,12 @@ export interface IHotel extends Document {
  *         offer: { type: string, example: 15% off midweek }
  *         featured: { type: boolean }
  */
+/**
+ * Shown in the public Hotels directory (Master Briefing v4, onboarding 100%):
+ * active, with a main photo and a direct booking URL. Publishing is automatic.
+ */
+export const LISTED_HOTEL = { isActive: true, image: { $gt: "" }, bookingUrl: { $gt: "" } } as const;
+
 const optionalEmail = {
   type: String,
   trim: true,
@@ -89,15 +104,20 @@ const hotelSchema = new Schema<IHotel>(
     memberNumber: { type: String, required: true, unique: true, trim: true },
     name: { type: String, required: [true, "Name is required"], trim: true, maxlength: 120 },
     slug: { type: String, required: true, unique: true, trim: true },
+    country: { type: String, enum: COUNTRY_CODES, default: DEFAULT_COUNTRY, index: true },
     city: { type: String, required: [true, "City is required"], trim: true },
-    region: { type: String, enum: REGIONS, required: [true, "Region is required"] },
+    region: { type: String, enum: [...REGIONS, ""], default: "" },
     address: { type: String, required: [true, "Address is required"], trim: true },
+    postalCode: { type: String, trim: true, uppercase: true, default: "", maxlength: 12 },
+    legalName: { type: String, trim: true, default: "", maxlength: 120 },
+    vatNumber: { type: String, trim: true, uppercase: true, default: "", match: [new RegExp(`^$|${VAT_REGEX.source}`), "Fill in a valid VAT number"] },
     description: { type: String, trim: true, default: "", maxlength: 1000 },
     image: { type: String, trim: true, default: "" },
     imageKey: { type: String, trim: true, default: "" },
     bookingUrl: { type: String, trim: true, default: "" },
     offer: { type: String, trim: true, default: "", maxlength: 60 },
     featured: { type: Boolean, default: false },
+    foundingMember: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     emails: {
       general: { ...optionalEmail, required: [true, "General email is required"] },
@@ -117,7 +137,7 @@ const hotelSchema = new Schema<IHotel>(
       faults: { type: Boolean, default: true },
       alerts: { type: Boolean, default: true },
     },
-    kvkNumber: { type: String, trim: true, default: "", match: [/^$|^[0-9]{8}$/, "KVK number has 8 digits"] },
+    kvkNumber: { type: String, trim: true, default: "", match: [new RegExp(`^$|${REGISTRATION_NUMBER_REGEX.source}`), "Fill in a valid registration number"] },
     contactPerson: { type: String, trim: true, default: "" },
     phone: { type: String, trim: true, default: "" },
     facilities: {

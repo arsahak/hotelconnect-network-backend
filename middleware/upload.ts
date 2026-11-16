@@ -40,10 +40,10 @@ export const cvUpload = multer({
 
 const OFFER_MIME_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
 
-// A supplier's quote: one PDF or photo, max 10MB (briefing §4.6). Stored in Spaces.
+// A supplier's quote: one PDF or photo, max 5MB (Master Briefing v4). Stored in Spaces.
 export const offerUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (!OFFER_MIME_TYPES.includes(file.mimetype)) {
       return cb(new ApiError(422, "The quote must be a PDF or a photo (JPEG, PNG, WEBP)"));
@@ -59,6 +59,18 @@ export const invoiceUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype !== "application/pdf") return cb(new ApiError(422, "The invoice must be a PDF"));
+    cb(null, true);
+  },
+});
+
+// Floor app issue photo (Master Briefing v4): max 150KB — the app shrinks it first.
+export const issuePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 150 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
+      return cb(new ApiError(422, "The photo must be a JPEG, PNG or WEBP image"));
+    }
     cb(null, true);
   },
 });

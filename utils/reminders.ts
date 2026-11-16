@@ -4,11 +4,13 @@ import { Hotel } from "../models/hotel.model";
 import { Notification } from "../models/notification.model";
 import { pushToHotel } from "./push";
 import { deleteExpiredPurchaseFiles } from "./purchasing";
-import { Permit } from "../models/permit.model";
-import { escapeHtml, sendEmail } from "./sendEmail";
+import { Permit, PERMIT_REMINDER_DAYS } from "../models/permit.model";
+import { complianceReminder, languageFor } from "./emailTemplates";
+import { sendEmail } from "./sendEmail";
 
 /** Briefing §3.4.1 / §3.4.4: reminders go out 30 days before the date. */
 export const REMINDER_DAYS = 30;
+const MAX_PERMIT_LEAD = Math.max(...PERMIT_REMINDER_DAYS);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RUN_EVERY_MS = 60 * 60 * 1000;
@@ -22,6 +24,9 @@ interface DueReminder {
   subtitle?: string;
   /** Dashboard page of the contract or permit. */
   link: string;
+  /** End / expiry date and the notice period or reminder lead time (email 6.5). */
+  endDate: Date;
+  notice: string;
   /** Marks the reminder as sent once the email went out. */
   markSent: () => Promise<unknown>;
 }
@@ -63,15 +68,17 @@ async function findDueReminders(today: Date): Promise<Map<string, DueReminder[]>
   // A renewing contract's notice deadline lies before its end date, so those
   // are fetched whenever the end date is still to come.
   const [contracts, permits] = await Promise.all([
-    Contract.find({ endDate: { $gte: today }, $or: [{ autoRenew: true }, { endDate: { $lte: until } }] })
+    Contract.find({ endDate: { $gte: today }, $or: [{ "noticePeriod.value": { $gt: 0 } }, { endDate: { $lte: until } }] })
       .select("+reminders")
       .lean(),
-    Permit.find({ expiryDate: { $gte: today, $lte: until } }).select("+reminderSentFor").lean(),
+    // Permits: each has its own lead time (up to 90 days), filtered below.
+    Permit.find({ expiryDate: { $gte: today, $lte: new Date(today.getTime() + MAX_PERMIT_LEAD * DAY_MS) } }).select("+reminderSentFor").lean(),
   ]);
 
   for (const c of contracts) {
     const title = c.contractFor || c.company || "Contract";
     const subtitle = c.contractFor && c.company ? c.company : undefined;
+    const notice = c.noticePeriod?.value ? `${c.noticePeriod.value} ${c.noticePeriod.unit ?? "months"}` : "—";
     const end = c.endDate ?? null;
     if (inWindow(end) && !sameDay(c.reminders?.endDate, end)) {
       add(c.hotel, {
@@ -80,6 +87,8 @@ async function findDueReminders(today: Date): Promise<Map<string, DueReminder[]>
         title,
         subtitle,
         link: `/hotel/contracts/${c._id}`,
+        endDate: end!,
+        notice,
         markSent: () => Contract.updateOne({ _id: c._id }, { "reminders.endDate": end }),
       });
     }
@@ -91,6 +100,8 @@ async function findDueReminders(today: Date): Promise<Map<string, DueReminder[]>
         title,
         subtitle,
         link: `/hotel/contracts/${c._id}`,
+        endDate: end!,
+        notice: deadline ? `${notice} (${formatDate(deadline)})` : notice,
         markSent: () => Contract.updateOne({ _id: c._id }, { "reminders.noticeDeadline": deadline }),
       });
     }
@@ -98,12 +109,16 @@ async function findDueReminders(today: Date): Promise<Map<string, DueReminder[]>
 
   for (const p of permits) {
     if (sameDay(p.reminderSentFor, p.expiryDate)) continue;
+    const lead = p.reminderDays ?? REMINDER_DAYS;
+    if (p.expiryDate!.getTime() > today.getTime() + lead * DAY_MS) continue;
     add(p.hotel, {
       kind: "permit_expiry",
       date: p.expiryDate!,
       title: p.type,
       subtitle: p.authority || undefined,
       link: `/hotel/permits/${p._id}`,
+      endDate: p.expiryDate!,
+      notice: `${lead} days`,
       markSent: () => Permit.updateOne({ _id: p._id }, { reminderSentFor: p.expiryDate }),
     });
   }
@@ -111,30 +126,6 @@ async function findDueReminders(today: Date): Promise<Map<string, DueReminder[]>
   return due;
 }
 
-function reminderEmail(hotelName: string, reminders: DueReminder[], today: Date): string {
-  const rows = reminders
-    .map(
-      (r) => `<tr>
-        <td style="padding:6px 16px 6px 0;white-space:nowrap"><strong>${formatDate(r.date)}</strong><br><span style="color:#6f665b;font-size:12px">${daysLeft(r.date, today)}</span></td>
-        <td style="padding:6px 16px 6px 0">${escapeHtml(r.title)}${r.subtitle ? `<br><span style="color:#6f665b;font-size:12px">${escapeHtml(r.subtitle)}</span>` : ""}</td>
-        <td style="padding:6px 0;color:#9f7b3b">${KIND_LABELS[r.kind]}</td>
-      </tr>`
-    )
-    .join("");
-
-  return `
-    <p>Dear ${escapeHtml(hotelName)},</p>
-    <p>These dates in your contract register and permits are coming up in the next ${REMINDER_DAYS} days:</p>
-    <table style="border-collapse:collapse">${rows}</table>
-    ${
-      reminders.some((r) => r.kind === "notice_deadline")
-        ? `<p style="margin-top:16px">Want to stop a contract that renews automatically? Cancel it before the last day to cancel.</p>`
-        : ""
-    }
-    <p style="margin-top:16px"><a href="${env.dashboardUrl}/dashboard" style="color:#9f7b3b">Open your HotelConnect dashboard</a></p>
-    <p style="color:#6f665b;font-size:12px;margin-top:16px">You get this email because system alerts are switched on in your email settings.</p>
-  `;
-}
 
 /**
  * Reminds every hotel of its contracts and permits that end within 30 days:
@@ -146,7 +137,7 @@ export async function sendDueReminders(now = new Date()): Promise<{ hotels: numb
   const due = await findDueReminders(today);
   if (!due.size) return { hotels: 0, reminders: 0 };
 
-  const hotels = await Hotel.find({ _id: { $in: [...due.keys()] }, isActive: true }).select("name emails notify notificationChannels notificationPush").lean();
+  const hotels = await Hotel.find({ _id: { $in: [...due.keys()] }, isActive: true }).select("name contactPerson country emails notify notificationChannels notificationPush").lean();
   let sentHotels = 0;
   let sentReminders = 0;
 
@@ -160,15 +151,21 @@ export async function sendDueReminders(now = new Date()): Promise<{ hotels: numb
     try {
       // Email first: if it fails nothing is marked, and the next run retries
       // without leaving a double melding in the inbox.
+      // Email 6.5 (Master Briefing v4): one per contract / permit, from noreply@, in the hotel's language.
       if (byEmail) {
-        await sendEmail({
-          to: hotel.emails.alerts || hotel.emails.general,
-          subject:
-            reminders.length === 1
-              ? `Reminder: ${KIND_LABELS[first.kind].split(" (")[0].toLowerCase()} – ${first.title} (${formatDate(first.date)})`
-              : `Reminder: ${reminders.length} contract and permit dates coming up`,
-          html: reminderEmail(hotel.name, reminders, today),
-        });
+        const lang = languageFor({ country: hotel.country });
+        for (const r of reminders) {
+          const mail = complianceReminder(lang, {
+            managerName: hotel.contactPerson || hotel.name,
+            hotelName: hotel.name,
+            itemName: r.title,
+            supplierName: r.subtitle ?? "",
+            expiryDate: formatDate(r.endDate),
+            notice: r.notice,
+            dashboardLink: `${env.dashboardUrl}${r.link}`,
+          });
+          await sendEmail({ to: hotel.emails.alerts || hotel.emails.general, subject: mail.subject, html: mail.html, from: mail.from });
+        }
       }
       if (channel !== "email") {
         await Notification.insertMany(
@@ -214,14 +211,22 @@ export async function runScheduledJobs() {
   const invoices = await deleteExpiredPurchaseFiles();
   if (invoices.files) console.log(`[purchasing] deleted ${invoices.files} invoice(s) of ${invoices.actions} completed action(s)`);
   // Billing and ads: renew memberships, pick up Moneybird payments, rotate sponsored spots.
-  const { renewSubscriptions, syncMoneybirdPayments } = await import("../services/billing");
+  const { renewSubscriptions, runCommissionDunning, syncMoneybirdPayments } = await import("../services/billing");
   const { rotateAds } = await import("../services/ads");
   const memberships = await renewSubscriptions();
   const moneybird = await syncMoneybirdPayments();
+  const commission = await runCommissionDunning();
   const ads = await rotateAds();
   const { applyRetention } = await import("./retention");
   const retention = await applyRetention();
-  return { reminders, invoices, memberships, moneybird, ads, retention };
+  // Story images uploaded with the editor but never used (older than a day).
+  const { sweepUnusedContentImages } = await import("./contentImages");
+  const contentImages = await sweepUnusedContentImages().catch((error) => {
+    console.error("[storage] content image sweep failed:", error instanceof Error ? error.message : error);
+    return { deleted: 0 };
+  });
+  if (contentImages.deleted) console.log(`[storage] deleted ${contentImages.deleted} unused story image(s)`);
+  return { reminders, invoices, memberships, moneybird, commission, ads, retention, contentImages };
 }
 
 async function runOnce(): Promise<void> {

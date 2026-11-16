@@ -11,14 +11,15 @@ import {
   listActions,
   withdrawAction,
 } from "../controllers/purchase.controller";
-import { adminOnly, hotelOnly } from "../middleware/auth";
+import { adminOnly, purchasingMember } from "../middleware/auth";
 import { invoiceUpload } from "../middleware/upload";
 import { validate } from "../middleware/validate";
 import { idParamRule } from "../validators/common.validator";
 import { joinRules, participationFileRules, purchaseActionRules } from "../validators/purchase.validator";
 
 const router = Router();
-const manager = hotelOnly("hotel_manager");
+// Hotel managers and suppliers with a maintenance contract (client, 31 Oct).
+const manager = purchasingMember;
 
 /**
  * @swagger

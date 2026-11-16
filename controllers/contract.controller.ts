@@ -12,6 +12,7 @@ import { pick } from "../utils/pick";
 const EDITABLE = [
   "contractFor",
   "company",
+  "email",
   "startDate",
   "endDate",
   "duration",
@@ -33,7 +34,7 @@ export const listContracts = asyncHandler(async (req: Request, res: Response) =>
   const filter: Record<string, unknown> = mine(req);
   if (q) {
     const match = containsRegex(q);
-    filter.$or = [{ contractFor: match }, { company: match }, { ledgerAccount: match }];
+    filter.$or = [{ contractFor: match }, { company: match }, { email: match }, { ledgerAccount: match }];
   }
 
   const contracts = await Contract.find(filter).sort({ endDate: 1, createdAt: -1 });

@@ -1,3 +1,4 @@
+import { contentImageKeys, deleteContentImages, deleteRemovedContentImages } from "../utils/contentImages";
 import type { Request, Response } from "express";
 import { Article, ARTICLE_LIST_FIELDS } from "../models/article.model";
 import { asyncHandler } from "../middleware/asyncHandler";
@@ -83,8 +84,11 @@ export const createArticle = asyncHandler(async (req: Request, res: Response) =>
 export const updateArticle = asyncHandler(async (req: Request, res: Response) => {
   const article = await Article.findById(req.params.id);
   if (!article) throw new ApiError(404, "Story not found");
+  const oldBody = article.body;
   applyArticleBody(article, req.body);
   await article.save();
+  // Images taken out of the text leave the storage too.
+  await deleteRemovedContentImages(oldBody, article.body, article._id);
   return ApiResponse(res, 200, "Story updated successfully", article);
 });
 
@@ -92,6 +96,8 @@ export const deleteArticle = asyncHandler(async (req: Request, res: Response) =>
   const article = await Article.findByIdAndDelete(req.params.id);
   if (!article) throw new ApiError(404, "Story not found");
   await deleteFromSpaces(article.imageKey);
+  // The images inside the text too (unless another story shows the same one).
+  await deleteContentImages(contentImageKeys(article.body), article._id);
   return ApiResponse(res, 200, "Story deleted successfully");
 });
 

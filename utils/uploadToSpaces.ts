@@ -7,6 +7,7 @@ import {
 import { randomUUID } from "crypto";
 import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import path from "path";
+import sharp from "sharp";
 import { env } from "../config/env";
 import { ApiError } from "./ApiError";
 
@@ -19,7 +20,7 @@ export interface SpacesUpload {
 
 let client: S3Client | null = null;
 
-const isConfigured = () =>
+export const isConfigured = () =>
   Boolean(env.spaces.key && env.spaces.secret && env.spaces.endpoint && env.spaces.region && env.spaces.bucket);
 
 /**
@@ -37,6 +38,9 @@ const EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
   "image/svg+xml": "svg",
   "application/pdf": "pdf",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
 };
 
 const assertConfigured = () => {
@@ -49,12 +53,12 @@ const assertConfigured = () => {
   ) {
     throw new ApiError(
       500,
-      "DigitalOcean Spaces is not configured for file uploads",
+      "File storage is not configured (STORAGE_* in .env)",
     );
   }
 };
 
-const getClient = (): S3Client => {
+export const getClient = (): S3Client => {
   if (client) return client;
   assertConfigured();
   client = new S3Client({
@@ -68,7 +72,7 @@ const getClient = (): S3Client => {
   return client;
 };
 
-const publicUrlFor = (key: string): string => {
+export const publicUrlFor = (key: string): string => {
   const cdnHost = env.spaces.cdnEndpoint.replace(/^https?:\/\//, "");
   if (cdnHost && !cdnHost.startsWith("your-")) {
     return `https://${cdnHost}/${key}`;
@@ -79,10 +83,35 @@ const publicUrlFor = (key: string): string => {
 // Every upload lands under the shared bucket's "hotelconnect/<subfolder>/"
 // prefix, keeping this project's files namespaced from other apps using
 // the same Space, and images/documents both served with public-read ACL.
+/** Raster images we re-encode; SVG (vector), PDFs and videos are stored as they are. */
+const WEBP_SOURCES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+/** Longest side after conversion: plenty for full-width photos, much smaller files. */
+const MAX_IMAGE_SIDE = 2560;
+
+/**
+ * Every uploaded photo is stored as WebP (sharp): turned upright from its EXIF
+ * data, camera metadata (e.g. GPS) removed, scaled down to at most 2560px,
+ * quality 82. Animated GIFs stay animated. Other files pass through unchanged.
+ */
+export async function toWebp(file: Express.Multer.File): Promise<Express.Multer.File> {
+  if (!WEBP_SOURCES.includes(file.mimetype)) return file;
+  try {
+    const buffer = await sharp(file.buffer, { animated: file.mimetype === "image/gif" || file.mimetype === "image/webp" })
+      .rotate()
+      .resize({ width: MAX_IMAGE_SIDE, height: MAX_IMAGE_SIDE, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 82, effort: 4 })
+      .toBuffer();
+    return { ...file, buffer, mimetype: "image/webp", size: buffer.length, originalname: file.originalname.replace(/\.[^.]+$/, "") + ".webp" };
+  } catch {
+    throw new ApiError(422, "This image could not be read. Please upload a JPEG, PNG, WEBP or GIF photo.");
+  }
+}
+
 export const uploadToSpaces = async (
-  file: Express.Multer.File,
+  original: Express.Multer.File,
   subfolder = "",
 ): Promise<SpacesUpload> => {
+  const file = await toWebp(original);
   // The extension comes from the checked file type, never from the file name.
   const extension = EXTENSIONS[file.mimetype];
 
@@ -115,6 +144,8 @@ export const uploadToSpaces = async (
       Body: file.buffer,
       ContentType: file.mimetype,
       ACL: "public-read",
+      // Every file gets a new random name, so browsers and CDNs may keep it for a year.
+      CacheControl: "public, max-age=31536000, immutable",
     }),
   );
 
@@ -140,7 +171,7 @@ export const deleteFromSpaces = async (key?: string): Promise<void> => {
       new DeleteObjectCommand({ Bucket: env.spaces.bucket, Key: key }),
     );
   } catch (err) {
-    console.error("Failed to delete from DigitalOcean Spaces:", key, err);
+    console.error("Failed to delete from object storage:", key, err);
   }
 };
 
@@ -159,7 +190,8 @@ export interface PrivateUpload {
   size: number;
 }
 
-export const uploadPrivate = async (file: Express.Multer.File, subfolder: string): Promise<PrivateUpload> => {
+export const uploadPrivate = async (original: Express.Multer.File, subfolder: string): Promise<PrivateUpload> => {
+  const file = await toWebp(original);
   const extension = EXTENSIONS[file.mimetype];
   const name = `${randomUUID()}${extension ? `.${extension}` : ""}`;
 

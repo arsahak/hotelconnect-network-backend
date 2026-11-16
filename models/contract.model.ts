@@ -10,6 +10,8 @@ export interface IContract extends Document {
   hotel: mongoose.Types.ObjectId;
   contractFor?: string;
   company?: string;
+  /** The supplier's email (Master Briefing v4 contract form; also for 1-tap orders and invites). */
+  email?: string;
   startDate?: Date | null;
   endDate?: Date | null;
   /** Free text, e.g. "3 years". */
@@ -60,6 +62,7 @@ const contractSchema = new Schema<IContract>(
     hotel: { type: Schema.Types.ObjectId, ref: "Hotel", required: true, index: true },
     contractFor: { type: String, trim: true, default: "", maxlength: 120 },
     company: { type: String, trim: true, default: "", maxlength: 120 },
+    email: { type: String, trim: true, lowercase: true, default: "", maxlength: 254 },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     duration: { type: String, trim: true, default: "", maxlength: 60 },
@@ -92,9 +95,10 @@ contractSchema.pre("validate", function (next) {
 });
 
 /** Last day to cancel an automatically renewing contract. */
-export function noticeDeadline(contract: Pick<IContract, "autoRenew" | "endDate" | "noticePeriod">): Date | null {
+export function noticeDeadline(contract: Pick<IContract, "endDate" | "noticePeriod">): Date | null {
   const value = contract.noticePeriod?.value;
-  if (!contract.autoRenew || !contract.endDate || !value) return null;
+  // Master Briefing v4: a notice period always gets a deadline (end date − notice).
+  if (!contract.endDate || !value) return null;
   const date = new Date(contract.endDate);
   const unit = contract.noticePeriod?.unit ?? "months";
   if (unit === "months") date.setMonth(date.getMonth() - value);

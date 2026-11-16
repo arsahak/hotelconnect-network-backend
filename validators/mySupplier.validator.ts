@@ -1,5 +1,5 @@
 import { body, type ValidationChain } from "express-validator";
-import { SUPPLIER_CATEGORIES, SUPPLIER_REGIONS } from "../config/constants";
+import { SUPPLIER_BIO_MAX, SUPPLIER_CATEGORIES, SUPPLIER_REGIONS } from "../config/constants";
 import { PHONE_REGEX } from "../models/user.model";
 import { optionalUrl } from "./common.validator";
 import { listOf } from "./supplier.validator";
@@ -23,8 +23,9 @@ export const mySupplierRules: ValidationChain[] = [
     .optional()
     .isString()
     .trim()
-    .custom((text: string) => text.split(/\s+/).filter(Boolean).length <= 200)
-    .withMessage("Description can be at most 200 words"),
+    .isLength({ max: SUPPLIER_BIO_MAX })
+    .withMessage(`The company bio can be at most ${SUPPLIER_BIO_MAX} characters`),
+  body("city").optional().isString().trim().isLength({ max: 80 }).withMessage("City can be at most 80 characters"),
   listOf("categories", SUPPLIER_CATEGORIES, "Categories"),
   listOf("regions", SUPPLIER_REGIONS, "Regions"),
   optionalUrl("website", "Website"),

@@ -1,17 +1,20 @@
 import type mongoose from "mongoose";
-import { AD_BLOCKS, AD_BLOCKS_FOR, AD_POSITIONS, AD_PRICES, euros, PERIOD_MONTHS, type AdBlock, type AdPeriod } from "../config/billing";
+import { AD_BLOCKS, AD_BLOCKS_FOR, AD_PERIOD_DAYS, AD_POSITIONS, AD_PRICES, type AdBlock, type AdPeriod } from "../config/billing";
 import { AdBooking, type IAdBooking } from "../models/adBooking.model";
-import { Hotel, HOTEL_PUBLIC_FIELDS } from "../models/hotel.model";
+import { Hotel, HOTEL_PUBLIC_FIELDS, LISTED_HOTEL } from "../models/hotel.model";
 import { Invoice } from "../models/invoice.model";
-import { Supplier, SUPPLIER_PUBLIC_FIELDS } from "../models/supplier.model";
+import { publicSupplier, Supplier, SUPPLIER_PUBLIC_FIELDS } from "../models/supplier.model";
 import { Vacancy, VACANCY_PUBLIC_FIELDS } from "../models/vacancy.model";
 import { ApiError } from "../utils/ApiError";
 import { notifyHotel, notifySupplier } from "../utils/notify";
-import { addInterval, cancelInvoice, createInvoice, type Owner } from "./billing";
+import { cancelInvoice, createInvoice, type Owner } from "./billing";
 
 type Id = mongoose.Types.ObjectId | string;
 
 const BLOCK_LABELS: Record<AdBlock, string> = { suppliers: "Suppliers", jobs: "Jobs", hotels: "Hotels" };
+const PERIOD_LABELS: Record<AdPeriod, string> = { fortnight: "14 days", month: "1 month (2 × 14 days)" };
+const DAY = 24 * 60 * 60 * 1000;
+const addDays = (date: Date, days: number) => new Date(date.getTime() + days * DAY);
 const ownerOf = (b: IAdBooking): Owner => (b.hotel ? { hotel: b.hotel } : { supplier: b.supplier! });
 const adsLink = (b: IAdBooking) => (b.hotel ? "/hotel/advertising" : "/supplier/advertising");
 
@@ -26,7 +29,7 @@ export async function adAvailability(now = new Date()) {
   const active = await AdBooking.find({ status: { $in: ["live", "queued"] } }).sort({ paidAt: 1 }).lean();
   return AD_BLOCKS.map((block) => ({
     block,
-    prices: AD_PRICES,
+    prices: AD_PRICES[block],
     positions: Array.from({ length: AD_POSITIONS }, (_, i) => {
       const position = i + 1;
       const here = active.filter((b) => b.block === block && b.position === position);
@@ -34,7 +37,7 @@ export async function adAvailability(now = new Date()) {
       const queued = here.filter((b) => b.status === "queued");
       // A new booking starts after the live one and everything already waiting.
       let nextStart = live?.endsAt ? new Date(live.endsAt) : now;
-      for (const q of queued) nextStart = addInterval(nextStart, "month", PERIOD_MONTHS[q.period]);
+      for (const q of queued) nextStart = addDays(nextStart, AD_PERIOD_DAYS[q.period]);
       return { position, liveUntil: live?.endsAt ?? null, waiting: queued.length, nextStart: nextStart < now ? now : nextStart };
     }),
   }));
@@ -60,12 +63,12 @@ export async function createAdBooking(input: { owner: Owner; block: AdBlock; pos
   }
 
   const booking = await AdBooking.create({ ...input.owner, block: input.block, position: input.position, period: input.period, vacancy });
-  const label = `Sponsored spot: ${BLOCK_LABELS[input.block]} block, position ${input.position}, 1 ${input.period}`;
+  const label = `Sponsored spot: ${BLOCK_LABELS[input.block]} block, position ${input.position}, ${PERIOD_LABELS[input.period]}`;
   const invoice = await createInvoice({
     owner: input.owner,
     kind: "advertising",
     description: label,
-    lines: [{ description: label, unitPrice: AD_PRICES[input.period] }],
+    lines: [{ description: label, unitPrice: AD_PRICES[input.block][input.period] }],
     reference: booking._id as Id,
     checkout: true,
     notify: false,
@@ -95,7 +98,7 @@ async function advanceQueue(block: AdBlock, position: number, now = new Date()) 
   if (!next) return [];
   next.status = "live";
   next.startsAt = now;
-  next.endsAt = addInterval(now, "month", PERIOD_MONTHS[next.period]);
+  next.endsAt = addDays(now, AD_PERIOD_DAYS[next.period]);
   await next.save();
   await notifyOwner(next, "Your ad is live", `Shown as "Sponsored" in the ${BLOCK_LABELS[block]} block until ${next.endsAt.toISOString().slice(0, 10)}.`);
   return [String(next._id)];
@@ -136,12 +139,10 @@ export async function liveSponsored() {
   const ids = (key: "hotel" | "supplier" | "vacancy", block: AdBlock) => live.filter((b) => b.block === block).map((b) => b[key]).filter(Boolean);
   const [suppliers, hotels, jobs] = await Promise.all([
     Supplier.find({ _id: { $in: ids("supplier", "suppliers") }, isActive: true }).select(SUPPLIER_PUBLIC_FIELDS).lean(),
-    Hotel.find({ _id: { $in: ids("hotel", "hotels") }, isActive: true }).select(HOTEL_PUBLIC_FIELDS).lean(),
+    Hotel.find({ _id: { $in: ids("hotel", "hotels") }, ...LISTED_HOTEL }).select(HOTEL_PUBLIC_FIELDS).lean(),
     Vacancy.find({ _id: { $in: ids("vacancy", "jobs") }, status: "published" }).select(VACANCY_PUBLIC_FIELDS).populate("hotel", "name slug city image").lean(),
   ]);
   const inOrder = <T extends { _id: unknown }>(items: T[], key: "hotel" | "supplier" | "vacancy", block: AdBlock) =>
     ids(key, block).map((id) => items.find((i) => String(i._id) === String(id))).filter((i): i is T => Boolean(i));
-  return { suppliers: inOrder(suppliers, "supplier", "suppliers"), hotels: inOrder(hotels, "hotel", "hotels"), jobs: inOrder(jobs, "vacancy", "jobs") };
+  return { suppliers: inOrder(suppliers, "supplier", "suppliers").map(publicSupplier), hotels: inOrder(hotels, "hotel", "hotels"), jobs: inOrder(jobs, "vacancy", "jobs") };
 }
-
-export const adPriceLabel = (period: AdPeriod) => `€${euros(AD_PRICES[period])} excl. VAT`;

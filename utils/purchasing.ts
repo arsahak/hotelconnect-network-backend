@@ -1,9 +1,9 @@
 import { PURCHASE_FILE_RETENTION_DAYS, PurchaseAction } from "../models/purchaseAction.model";
 import { PurchaseParticipation } from "../models/purchaseParticipation.model";
-import { notifyHotel } from "./notify";
+import { notifyHotel, notifySupplier } from "./notify";
 import { deletePrivate } from "./uploadToSpaces";
 
-/** Number of hotels per action. */
+/** Number of participants (hotels and contract suppliers) per action. */
 export async function participantCounts(actionIds: unknown[]) {
   const counts = await PurchaseParticipation.aggregate<{ _id: unknown; count: number }>([
     { $match: { action: { $in: actionIds } } },
@@ -12,10 +12,16 @@ export async function participantCounts(actionIds: unknown[]) {
   return new Map(counts.map((c) => [String(c._id), c.count]));
 }
 
-/** Tells every participating hotel about a status change (melding type "system"). */
+/** Tells every participant about a status change (melding type "system"). */
 export async function notifyParticipants(actionId: unknown, title: string, body: string) {
-  const hotels = await PurchaseParticipation.find({ action: actionId }).distinct("hotel");
-  await Promise.all(hotels.map((hotel) => notifyHotel(String(hotel), { type: "system", title, body, link: "/hotel/purchasing" })));
+  const participants = await PurchaseParticipation.find({ action: actionId }).select("hotel supplier").lean();
+  await Promise.all(
+    participants.map((p) =>
+      p.hotel
+        ? notifyHotel(String(p.hotel), { type: "system", title, body, link: "/hotel/purchasing" })
+        : notifySupplier(String(p.supplier), { type: "system", title, body, link: "/supplier/purchasing" })
+    )
+  );
 }
 
 /**

@@ -1,5 +1,5 @@
 import { body, param, query, type ValidationChain } from "express-validator";
-import { SUPPLIER_CATEGORIES, SUPPLIER_REGIONS } from "../config/constants";
+import { COUNTRY_CODES, SUPPLIER_BIO_MAX, SUPPLIER_CATEGORIES, SUPPLIER_REGIONS } from "../config/constants";
 import { adminListRules, idParamRule, listQueryRules, optionalIn, optionalUrl, slugParamRule } from "./common.validator";
 import { PHONE_REGEX } from "../models/user.model";
 
@@ -34,8 +34,10 @@ export const supplierBodyRules = (create: boolean): ValidationChain[] => [
     .optional()
     .isString()
     .trim()
-    .custom((text: string) => text.split(/\s+/).filter(Boolean).length <= 200)
-    .withMessage("Description can be at most 200 words"),
+    .isLength({ max: SUPPLIER_BIO_MAX })
+    .withMessage(`The company bio can be at most ${SUPPLIER_BIO_MAX} characters`),
+  body("city").optional().isString().trim().isLength({ max: 80 }).withMessage("City can be at most 80 characters"),
+  body("country").optional().isIn(COUNTRY_CODES).withMessage("Choose the country"),
   listOf("categories", SUPPLIER_CATEGORIES, "Categories"),
   listOf("regions", SUPPLIER_REGIONS, "Regions"),
   optionalUrl("website", "Website"),

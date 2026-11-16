@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { deleteMyLogo, getMySupplier, updateMySupplier, uploadMyLogo } from "../controllers/mySupplier.controller";
+import { listMyPartnerHotels } from "../controllers/partner.controller";
 import { supplierOnly } from "../middleware/auth";
 import { upload } from "../middleware/upload";
 import { validate } from "../middleware/validate";
@@ -65,5 +66,17 @@ router.get("/", supplierOnly, getMySupplier);
 router.patch("/", supplierOnly, mySupplierRules, validate, updateMySupplier);
 router.put("/logo", supplierOnly, upload.single("image"), uploadMyLogo);
 router.delete("/logo", supplierOnly, deleteMyLogo);
+
+/**
+ * @swagger
+ * /my-supplier/partners:
+ *   get:
+ *     summary: My Partner Hotels — hotels that invited this supplier (Master Briefing v4)
+ *     tags: [MySupplier]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: "[{ hotel: { name, slug, city, image }, since }]" }
+ */
+router.get("/partners", supplierOnly, listMyPartnerHotels);
 
 export default router;

@@ -1,7 +1,8 @@
 import mongoose, { Schema, Document } from "mongoose";
-import { REGIONS, SUPPLIER_CATEGORIES, TENDER_TYPES, type TenderType } from "../config/constants";
+import { COUNTRY_CODES, DEFAULT_COUNTRY, REGIONS, SUPPLIER_CATEGORIES, tenderSize, TENDER_TYPES, type TenderSize, type TenderType } from "../config/constants";
 
-export const TENDER_STATUSES = ["open", "awarded", "cancelled"] as const;
+/** "closed": the hotel closed it (Master Briefing v4 [ Close Tender ]), e.g. after agreeing directly with a supplier. */
+export const TENDER_STATUSES = ["open", "awarded", "closed", "cancelled"] as const;
 export type TenderStatus = (typeof TENDER_STATUSES)[number];
 
 /**
@@ -15,17 +16,25 @@ export interface ITender extends Document {
   type: TenderType;
   title: string;
   category: string;
+  /** Country_Tag of the hotel: suppliers in this country with this trade see the tender. */
+  country: string;
+  city: string;
   region: string;
+  /** Shown to signed-in suppliers (Master Briefing v4); the hotel's general email if empty. */
+  contactEmail: string;
   description: string;
   /** Last day suppliers can send a quote (the whole day counts). */
   deadline: Date;
   budget?: number | null;
+  /** Below €5,000 a need, otherwise a tender — set from the budget. */
+  size: TenderSize;
   status: TenderStatus;
   /** The suppliers this tender was sent to. */
   invitedSuppliers: mongoose.Types.ObjectId[];
   /** The winning offer, once the hotel has chosen. */
   winner?: mongoose.Types.ObjectId | null;
   awardedAt?: Date | null;
+  closedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,7 +47,8 @@ export interface ITender extends Document {
  *       type: object
  *       properties:
  *         _id: { type: string }
- *         type: { type: string, enum: [Tender, Maintenance contract, Product request] }
+ *         type: { type: string, enum: [Maintenance, One-time assignment, Other] }
+ *         size: { type: string, enum: [need, tender], description: below €5,000 a need, otherwise a tender }
  *         title: { type: string, example: New boiler for the spa }
  *         category: { type: string, example: Technical maintenance }
  *         region: { type: string, example: North Holland }
@@ -50,17 +60,23 @@ export interface ITender extends Document {
 const tenderSchema = new Schema<ITender>(
   {
     hotel: { type: Schema.Types.ObjectId, ref: "Hotel", required: true, index: true },
-    type: { type: String, enum: TENDER_TYPES, default: "Tender" },
+    type: { type: String, enum: TENDER_TYPES, default: "One-time assignment" },
     title: { type: String, required: [true, "Title is required"], trim: true, maxlength: 120 },
     category: { type: String, enum: SUPPLIER_CATEGORIES, required: [true, "Category is required"] },
-    region: { type: String, enum: REGIONS, required: [true, "Region is required"] },
+    country: { type: String, enum: COUNTRY_CODES, default: DEFAULT_COUNTRY, index: true },
+    city: { type: String, trim: true, default: "" },
+    // Dutch province; empty outside the Netherlands.
+    region: { type: String, enum: [...REGIONS, ""], default: "" },
+    contactEmail: { type: String, trim: true, lowercase: true, default: "", maxlength: 254 },
     description: { type: String, required: [true, "Description is required"], trim: true, maxlength: 5000 },
     deadline: { type: Date, required: [true, "Deadline is required"] },
     budget: { type: Number, min: 0, default: null },
+    size: { type: String, enum: ["need", "tender"], default: "tender" },
     status: { type: String, enum: TENDER_STATUSES, default: "open", index: true },
     invitedSuppliers: [{ type: Schema.Types.ObjectId, ref: "Supplier", index: true }],
     winner: { type: Schema.Types.ObjectId, ref: "Offer", default: null },
     awardedAt: { type: Date, default: null },
+    closedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -71,5 +87,11 @@ export function isAcceptingOffers(tender: Pick<ITender, "status" | "deadline">, 
   end.setUTCHours(23, 59, 59, 999);
   return tender.status === "open" && now <= end;
 }
+
+// The budget decides whether this is a need (small job) or a tender.
+tenderSchema.pre("validate", function (next) {
+  if (this.budget != null) this.size = tenderSize(this.budget);
+  next();
+});
 
 export const Tender = mongoose.model<ITender>("Tender", tenderSchema);

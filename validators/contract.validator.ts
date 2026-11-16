@@ -9,6 +9,7 @@ const text = (field: string, max: number, label: string) =>
 export const contractBodyRules: ValidationChain[] = [
   text("contractFor", 120, "Contract for"),
   text("company", 120, "Company"),
+  body("email").optional({ checkFalsy: true }).trim().isEmail().withMessage("Fill in a valid email address").customSanitizer((v: string) => v.toLowerCase()),
   optionalDate("startDate", "Start date"),
   optionalDate("endDate", "End date"),
   text("duration", 60, "Duration"),

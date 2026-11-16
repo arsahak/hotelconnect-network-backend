@@ -48,7 +48,7 @@ const router = Router();
  *               price: { type: number }
  *               deliveryTime: { type: string }
  *               notes: { type: string }
- *               file: { type: string, format: binary, description: PDF or photo, max 10MB }
+ *               file: { type: string, format: binary, description: PDF or photo, max 5MB }
  *     responses:
  *       201: { description: Quote sent }
  *       200: { description: Quote updated }
