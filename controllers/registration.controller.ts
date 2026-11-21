@@ -77,7 +77,11 @@ export const createRegistration = asyncHandler(async (req: Request, res: Respons
     phone: req.body.phone ?? "",
     passwordHash: await bcrypt.hash(String(req.body.password), 10),
     country: req.body.country,
+    // Clickwrap audit trail: date/time, IP (the website passes the visitor's), version and documents.
     termsAcceptedAt: new Date(),
+    termsIp: req.body.clientIp || req.ip || "",
+    termsVersion: req.body.termsVersion ?? "",
+    termsDocuments: req.body.termsDocuments ?? [],
     ...extra,
   });
 

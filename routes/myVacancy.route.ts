@@ -11,7 +11,7 @@ import {
 import { vacancyOwner } from "../middleware/auth";
 import { upload } from "../middleware/upload";
 import { validate } from "../middleware/validate";
-import { requireFirstContract } from "../middleware/onboarding";
+import { requireFullOnboarding } from "../middleware/onboarding";
 import { idParamRule } from "../validators/common.validator";
 import { myVacancyRules } from "../validators/vacancy.validator";
 
@@ -80,7 +80,7 @@ const manager = vacancyOwner;
  *       200: { description: Photo removed }
  */
 router.get("/", manager, listMyVacancies);
-router.post("/", manager, requireFirstContract, myVacancyRules(true), validate, createMyVacancy);
+router.post("/", manager, requireFullOnboarding, myVacancyRules(true), validate, createMyVacancy);
 router.get("/:id", manager, idParamRule, validate, getMyVacancy);
 router.patch("/:id", manager, idParamRule, myVacancyRules(false), validate, updateMyVacancy);
 router.delete("/:id", manager, idParamRule, validate, deleteMyVacancy);

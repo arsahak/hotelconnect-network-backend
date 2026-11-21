@@ -1,6 +1,6 @@
 import { body, query, type ValidationChain } from "express-validator";
 import { COUNTRY_CODES, REGIONS, REGISTRATION_NUMBER_REGEX, SUPPLIER_CATEGORIES, SUPPLIER_REGIONS, VAT_REGEX } from "../config/constants";
-import { REGISTRATION_STATUSES, SUPPLIER_PLANS } from "../models/registration.model";
+import { LEGAL_DOCUMENTS, REGISTRATION_STATUSES, SUPPLIER_PLANS } from "../models/registration.model";
 import { PHONE_REGEX } from "../models/user.model";
 import { idParamRule, optionalUrl } from "./common.validator";
 import { listOf } from "./supplier.validator";
@@ -18,7 +18,11 @@ const compact = (v: unknown) => String(v ?? "").replace(/\s/g, "");
 export const registrationRules: ValidationChain[] = [
   body("type").isIn(["hotel", "supplier"]).withMessage("Choose hotel or supplier"),
   body("country").default("NL").isIn(COUNTRY_CODES).withMessage("Choose the country"),
-  body("acceptTerms").custom((v) => v === true || v === "true").withMessage("Please agree to the Terms & Conditions and Privacy Policy"),
+  body("acceptTerms").custom((v) => v === true || v === "true").withMessage("Please accept the agreement and the terms"),
+  body("termsVersion").optional().isString().trim().isLength({ max: 60 }),
+  body("termsDocuments").optional().isArray({ max: 5 }),
+  body("termsDocuments.*").isIn(LEGAL_DOCUMENTS).withMessage("Unknown document"),
+  body("clientIp").optional({ checkFalsy: true }).isIP().withMessage("Unknown IP address"),
   body("companyName").trim().isLength({ min: 2, max: 120 }).withMessage("Fill in your company name"),
   body("kvkNumber")
     .customSanitizer(compact)

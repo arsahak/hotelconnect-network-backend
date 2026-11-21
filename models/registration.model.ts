@@ -6,6 +6,9 @@ import { EMAIL_REGEX } from "./user.model";
 export const REGISTRATION_STATUSES = ["pending", "waiting", "approved", "rejected"] as const;
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 
+/** The legal documents a member can accept at registration (website public/legal). */
+export const LEGAL_DOCUMENTS = ["hotel-agreement", "hotel-terms", "supplier-agreement"] as const;
+
 export const SUPPLIER_PLANS = ["contract", "commission"] as const;
 export type SupplierPlan = (typeof SUPPLIER_PLANS)[number];
 
@@ -26,8 +29,11 @@ export interface IRegistration extends Document {
   passwordHash: string;
   /** Country_Tag (v4), hotels and suppliers. */
   country: string;
-  /** When the applicant ticked "I agree to the Terms & Conditions and Privacy Policy". */
+  /** Clickwrap (client, 21 Nov 2026): when, from which IP, which documents and which version were accepted. */
   termsAcceptedAt?: Date | null;
+  termsIp?: string;
+  termsVersion?: string;
+  termsDocuments?: string[];
   /** Hotels (v4 7-field form) */
   legalName?: string;
   vatNumber?: string;
@@ -99,6 +105,9 @@ const registrationSchema = new Schema<IRegistration>(
     passwordHash: { type: String, required: true, select: false },
     country: { type: String, enum: COUNTRY_CODES, default: DEFAULT_COUNTRY },
     termsAcceptedAt: { type: Date, default: null },
+    termsIp: { type: String, trim: true, default: "", maxlength: 64 },
+    termsVersion: { type: String, trim: true, default: "", maxlength: 60 },
+    termsDocuments: { type: [String], default: [] },
     legalName: { type: String, trim: true, default: "", maxlength: 120 },
     vatNumber: { type: String, trim: true, uppercase: true, default: "", match: [new RegExp(`^$|${VAT_REGEX.source}`), "Fill in a valid VAT number"] },
     address: { type: String, trim: true, default: "" },

@@ -74,7 +74,7 @@ router.get("/", managerOrStaff, getMyHotel);
  * /my-hotel/progress:
  *   get:
  *     summary: Onboarding progress (25% details · 50% rooms + staff · 75% first contract · 100% photo + booking URL)
- *     description: 75% unlocks Tenders and Jobs; at 100% the hotel is listed in the public Hotels directory.
+ *     description: At 100% the hotel is listed in the public Hotels directory and can use Tenders and Jobs.
  *     tags: [My hotel]
  *     security: [{ bearerAuth: [] }]
  *     responses:

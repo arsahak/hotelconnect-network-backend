@@ -23,6 +23,14 @@ for (const key of requiredVars) {
   }
 }
 
+const origin = (url: string) => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "";
+  }
+};
+
 export const env = {
   port,
   nodeEnv: process.env.NODE_ENV || "development",
@@ -31,15 +39,14 @@ export const env = {
   // MONGO_URI has no database path segment, so the db name is passed to
   // mongoose.connect() separately via this.
   dbName: process.env.DB_NAME || "hotelconnect",
-  clientUrl: process.env.CLIENT_URL || "http://localhost:3000",
-  clientUrls: (process.env.CLIENT_URL || "http://localhost:3000")
-    .split(",")
-    .map((url) => url.trim())
-    .filter(Boolean),
-  // The public website (invite links, tenders).
-  websiteUrl: (process.env.WEBSITE_URL || "http://localhost:3000").replace(/\/$/, ""),
-  // Linked from emails to hotels (e.g. contract reminders).
+  // The public website (links in e-mails). CLIENT_URL is the older name.
+  websiteUrl: (process.env.WEBSITE_URL || process.env.CLIENT_URL || "http://localhost:3000").replace(/\/$/, ""),
+  // The dashboard (links in e-mails to members).
   dashboardUrl: (process.env.DASHBOARD_URL || "http://localhost:3001").replace(/\/$/, ""),
+  // CORS in production: the website and the dashboard may call the API from the browser.
+  get clientUrls(): string[] {
+    return [...new Set([origin(this.websiteUrl), origin(this.dashboardUrl)].filter(Boolean))];
+  },
   // Briefing §7: admins sign in with an emailed code as a second step.
   // Only for local development it can be switched off with ADMIN_TWO_FACTOR=off.
   adminTwoFactor: process.env.ADMIN_TWO_FACTOR !== "off" || process.env.NODE_ENV === "production",
@@ -95,10 +102,8 @@ export const env = {
     apiKey: process.env.RESEND_API_KEY || "",
     fromEmail: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
   },
-  // Client (31 Oct): system emails from no-reply@hotelconnect-network.nl,
-  // replies to info@hotelconnect-network.nl, sent through TransIP SMTP.
-  // Master Briefing v4: welcomes and invites from info@hotelconnectnetwork.com;
-  // alerts and resets from noreply@hotelconnectnetwork.com with Reply-To info@.
+  // System emails from noreply@hotelconnectnetwork.com (MAIL_FROM) and info@ (MAIL_FROM_INFO),
+  // replies to info@ (MAIL_REPLY_TO); through SMTP when SMTP_HOST is set, otherwise Resend.
   mail: {
     from: process.env.MAIL_FROM || process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
     fromInfo: process.env.MAIL_FROM_INFO || process.env.MAIL_FROM || process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",

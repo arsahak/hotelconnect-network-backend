@@ -4,7 +4,7 @@ import { hotelOnly } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { awardRules, listTendersRules, reviewRules, tenderCreateRules, tenderIdRules, tenderUpdateRules } from "../validators/tender.validator";
 import { requireFeature } from "../middleware/feature";
-import { requireFirstContract } from "../middleware/onboarding";
+import { requireFullOnboarding } from "../middleware/onboarding";
 
 const router = Router();
 const manager = hotelOnly("hotel_manager");
@@ -38,7 +38,7 @@ const manager = hotelOnly("hotel_manager");
  *       201: { description: Tender sent (invitedCount = number of suppliers) }
  */
 router.get("/", manager, listTendersRules, validate, listTenders);
-router.post("/", manager, requireFirstContract, tenderCreateRules, validate, createTender);
+router.post("/", manager, requireFullOnboarding, tenderCreateRules, validate, createTender);
 
 /**
  * @swagger

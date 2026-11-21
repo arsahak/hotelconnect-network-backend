@@ -8,8 +8,9 @@ import { User } from "../models/user.model";
  * Onboarding progress bar (Master Briefing v4, part 2), 25% per step:
  *  25% company details (the registration form)
  *  50% rooms/spaces + at least 1 staff account
- *  75% at least 1 contract → unlocks Tenders & Jobs
- * 100% main hotel photo + booking URL → listed in the Hotels directory
+ *  75% at least 1 contract
+ * 100% main hotel photo + booking URL → listed in the Hotels directory, and
+ *      Tenders & Jobs unlock (Terms & Conditions for hotels, Art. 2.3)
  */
 export type HotelProgress = {
   percent: number;
@@ -32,9 +33,4 @@ export async function hotelProgress(hotel: ProgressHotel): Promise<HotelProgress
     published: Boolean(hotel.image && hotel.bookingUrl),
   };
   return { percent: Object.values(steps).filter(Boolean).length * 25, steps };
-}
-
-/** 75%: Tenders and Jobs open once the hotel has added its first contract. */
-export async function hasFirstContract(hotelId: Types.ObjectId | string) {
-  return Boolean(await Contract.exists({ hotel: hotelId }));
 }
